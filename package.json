@@ -1,0 +1,19 @@
+{
+  "name": "video-roulette",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Telegram Mini App video roulette: WebRTC + WebSocket matchmaking",
+  "type": "module",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node --env-file-if-exists=.env src/server.js",
+    "dev": "DEV_ALLOW_ANON=1 node --env-file-if-exists=.env --watch src/server.js",
+    "test": "node --test test/*.test.js"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}

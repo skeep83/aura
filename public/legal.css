@@ -1,0 +1,10 @@
+:root { color-scheme: dark; }
+body { margin: 0; background: #07070c; color: #e9e9f0; font: 400 16px/1.6 Manrope, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+main { max-width: 720px; margin: 0 auto; padding: 32px 16px 64px; }
+h1 { font-size: 30px; font-weight: 800; letter-spacing: -.02em; margin: 0 0 4px;
+  background: linear-gradient(135deg, #8b5cff, #ff4d9d 55%, #ffa53c); -webkit-background-clip: text; background-clip: text; color: transparent; }
+h2 { font-size: 19px; margin: 28px 0 8px; }
+.upd { color: #9b9bb0; font-size: 14px; margin: 0 0 24px; }
+a { color: #c9b8ff; }
+li { margin: 4px 0; }
+.todo { background: rgba(255,165,60,.15); border: 1px dashed #ffa53c; border-radius: 6px; padding: 0 4px; }

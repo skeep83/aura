@@ -1,0 +1,70 @@
+# Весь сервис одной командой: docker compose up -d
+# Настройки — в .env (создаётся deploy/install.sh или вручную по .env.example)
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATA_DIR: /data
+      MODERATION_URL: ${MODERATION_URL:-http://moderation:8000}
+    volumes:
+      - app-data:/data
+    depends_on:
+      moderation:
+        condition: service_started
+
+  moderation:
+    build: ./moderation
+    restart: unless-stopped
+    environment:
+      MODERATION_TOKEN: ${MODERATION_TOKEN}
+
+  caddy:
+    image: caddy:2.8-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - app
+
+  # TURN-ретранслятор для тех, кто за NAT/CGNAT (мобильные сети). Нужен host-network ради UDP-диапазона.
+  coturn:
+    image: coturn/coturn:4.6
+    restart: unless-stopped
+    network_mode: host
+    command:
+      - -n
+      - --listening-port=3478
+      - --fingerprint
+      - --use-auth-secret
+      - --static-auth-secret=${TURN_SECRET}
+      - --realm=${TURN_HOST}
+      - --external-ip=${PUBLIC_IP}
+      - --min-port=49160
+      - --max-port=49999
+      - --total-quota=400
+      - --stale-nonce=600
+      - --no-cli
+      - --no-multicast-peers
+      - --no-tlsv1
+      - --no-tlsv1_1
+      - --denied-peer-ip=0.0.0.0-0.255.255.255
+      - --denied-peer-ip=10.0.0.0-10.255.255.255
+      - --denied-peer-ip=100.64.0.0-100.127.255.255
+      - --denied-peer-ip=127.0.0.0-127.255.255.255
+      - --denied-peer-ip=169.254.0.0-169.254.255.255
+      - --denied-peer-ip=172.16.0.0-172.31.255.255
+      - --denied-peer-ip=192.168.0.0-192.168.255.255
+
+volumes:
+  app-data:
+  caddy-data:
+  caddy-config:

@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Aura: светящееся кольцо-аура, которое «прорывает» искра. Всё важное — внутри круга (Telegram обрезает аватар в круг) -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#36d1f0"/>
+      <stop offset=".52" stop-color="#4a86f7"/>
+      <stop offset="1" stop-color="#5a4ff0"/>
+    </linearGradient>
+    <radialGradient id="hi" cx=".28" cy=".18" r=".7">
+      <stop offset="0" stop-color="#fff" stop-opacity=".42"/>
+      <stop offset="1" stop-color="#fff" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="disc" cx=".4" cy=".35" r=".7">
+      <stop offset="0" stop-color="#fff" stop-opacity=".26"/>
+      <stop offset="1" stop-color="#fff" stop-opacity=".06"/>
+    </radialGradient>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="14"/>
+    </filter>
+    <path id="spark" d="M0-64C6-16 16-6 64 0C16 6 6 16 0 64C-6 16-16 6-64 0C-16-6-6-16 0-64Z"/>
+  </defs>
+
+  <rect width="512" height="512" fill="url(#bg)"/>
+  <rect width="512" height="512" fill="url(#hi)"/>
+
+  <!-- стеклянный диск внутри кольца -->
+  <circle cx="256" cy="262" r="118" fill="url(#disc)"/>
+
+  <!-- свечение кольца -->
+  <g transform="rotate(-20.5 256 262)" opacity=".75" filter="url(#glow)">
+    <circle cx="256" cy="262" r="140" fill="none" stroke="#bff3ff" stroke-width="30" stroke-linecap="round" stroke-dasharray="760 120"/>
+  </g>
+  <!-- кольцо-аура с разрывом справа сверху -->
+  <g transform="rotate(-20.5 256 262)">
+    <circle cx="256" cy="262" r="140" fill="none" stroke="#fff" stroke-width="30" stroke-linecap="round" stroke-dasharray="760 120"/>
+  </g>
+
+  <!-- искра в разрыве -->
+  <g transform="translate(355 163)">
+    <use href="#spark" fill="#bff3ff" filter="url(#glow)" opacity=".9"/>
+    <use href="#spark" fill="#fff"/>
+  </g>
+  <g transform="translate(404 112) scale(.32)">
+    <use href="#spark" fill="#fff" opacity=".85"/>
+  </g>
+</svg>

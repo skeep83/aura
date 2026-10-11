@@ -1,0 +1,360 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#e7e9f4">
+  <title>Aura — видеочат со всем миром</title>
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <script>
+    // Тема до отрисовки, чтобы не мигало: выбор пользователя → Telegram → система
+    (function () {
+      var tg = window.Telegram && window.Telegram.WebApp;
+      var pref = null;
+      try { pref = localStorage.getItem('theme'); } catch (e) {}
+      var dark = pref === 'dark' || (pref !== 'light' && (tg && tg.colorScheme ? tg.colorScheme === 'dark'
+        : window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches));
+      document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+    })();
+  </script>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <defs>
+      <linearGradient id="g-main" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#36d1f0"/><stop offset=".5" stop-color="#4a86f7"/><stop offset="1" stop-color="#5a4ff0"/>
+      </linearGradient>
+    </defs>
+    <symbol id="i-spark" viewBox="0 0 24 24"><path d="M12 1.5c.5 4.9 2.3 7.6 6 9-3.7 1.4-5.5 4.1-6 9-.5-4.9-2.3-7.6-6-9 3.7-1.4 5.5-4.1 6-9Z"/><path d="M19.5 15.5c.2 1.8.9 2.8 2.3 3.3-1.4.5-2.1 1.5-2.3 3.3-.2-1.8-.9-2.8-2.3-3.3 1.4-.5 2.1-1.5 2.3-3.3Z" opacity=".6"/></symbol>
+    <symbol id="i-mic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></symbol>
+    <symbol id="i-mic-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M15 9.3V6a3 3 0 0 0-5.7-1.3M9 9v2a3 3 0 0 0 4.6 2.5M5 11a7 7 0 0 0 11.3 5.5M19 11a7 7 0 0 1-.6 2.8M12 18v3M3 3l18 18"/></symbol>
+    <symbol id="i-flip" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><path d="M9.5 12.5a3 3 0 0 1 5-1.5M14.5 14.5a3 3 0 0 1-5 1.5M14.5 9.5V11H13M9.5 17.5V16H11"/></symbol>
+    <symbol id="i-chat" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M4 5h16v11H9l-5 4z"/></symbol>
+    <symbol id="i-flag" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 21V4M5 4h11l-2 4 2 4H5"/></symbol>
+    <symbol id="i-next" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h13M13 6l6 6-6 6"/></symbol>
+    <symbol id="i-pause" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 6v12M15 6v12"/></symbol>
+    <symbol id="i-crown" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M3 8l4.5 3.5L12 5l4.5 6.5L21 8l-2 11H5z"/></symbol>
+    <symbol id="i-filter" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 6h16M7 12h10M10 18h4"/></symbol>
+    <symbol id="i-send" viewBox="0 0 24 24" fill="currentColor"><path d="M3.4 20.4 21 12 3.4 3.6 3.4 10l12 2-12 2z"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M12 3l8 3v6c0 4.5-3.4 8.2-8 9-4.6-.8-8-4.5-8-9V6z"/></symbol>
+    <symbol id="i-eye-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3 3l18 18M10.6 6.1A9.8 9.8 0 0 1 12 6c5 0 9 6 9 6a17 17 0 0 1-2.6 3.2M6.6 7.6A16 16 0 0 0 3 12s4 6 9 6a8.6 8.6 0 0 0 4.4-1.2M9.9 9.9a3 3 0 0 0 4.2 4.2"/></symbol>
+    <symbol id="i-male" viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="20" cy="28" r="12"/><path d="M29 19l11-11M30 8h10v10"/></symbol>
+    <symbol id="i-female" viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="24" cy="18" r="12"/><path d="M24 30v12M18 37h12"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M4.6 4.6 6 6M18 18l1.4 1.4M2.5 12h2M19.5 12h2M4.6 19.4 6 18M18 6l1.4-1.4"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M20.5 14.6A8.5 8.5 0 0 1 9.4 3.5a8.5 8.5 0 1 0 11.1 11.1Z"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></symbol>
+  </svg>
+
+  <!-- Фон: 3D-трубка и парящие диски под матовым стеклом -->
+  <svg class="decor" viewBox="0 0 400 860" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+    <defs>
+      <linearGradient id="tube" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#3fd8f2"/><stop offset=".45" stop-color="#3f8ff7"/><stop offset="1" stop-color="#5a4ff0"/>
+      </linearGradient>
+      <linearGradient id="tube-hi" x1="0" y1="0" x2="1" y2="0">
+        <stop offset="0" stop-color="#fff" stop-opacity=".0"/><stop offset=".5" stop-color="#fff" stop-opacity=".55"/><stop offset="1" stop-color="#fff" stop-opacity="0"/>
+      </linearGradient>
+      <linearGradient id="disc-top" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#d9d3fb"/>
+      </linearGradient>
+      <linearGradient id="disc-edge" x1="0" y1="0" x2="1" y2="0">
+        <stop offset="0" stop-color="#a7b4ff"/><stop offset="1" stop-color="#3fd8f2"/>
+      </linearGradient>
+    </defs>
+    <g class="tube">
+      <path d="M250 -40 C 330 120 360 260 230 360 C 90 470 -40 470 -20 620 C 0 760 210 760 330 900" fill="none" stroke="url(#tube)" stroke-width="64" stroke-linecap="round"/>
+      <path d="M250 -40 C 330 120 360 260 230 360 C 90 470 -40 470 -20 620 C 0 760 210 760 330 900" fill="none" stroke="url(#tube-hi)" stroke-width="14" stroke-linecap="round" transform="translate(-10 -6)" opacity=".7"/>
+    </g>
+    <g class="disc d1" transform="translate(300 150) rotate(-18)">
+      <ellipse cx="0" cy="9" rx="62" ry="24" fill="url(#disc-edge)"/>
+      <ellipse cx="0" cy="0" rx="62" ry="24" fill="url(#disc-top)"/>
+    </g>
+    <g class="disc d2" transform="translate(70 770) rotate(14)">
+      <ellipse cx="0" cy="11" rx="86" ry="30" fill="url(#disc-edge)"/>
+      <ellipse cx="0" cy="0" rx="86" ry="30" fill="url(#disc-top)"/>
+    </g>
+  </svg>
+
+  <!-- Онбординг -->
+  <main id="onboard" class="screen">
+    <div class="panel lg onboard">
+      <header class="head">
+        <span class="eyebrow" data-i="eyebrow">Видеочат</span>
+        <button class="icon-btn lg theme-toggle" aria-label="Сменить тему"><svg><use href="#i-moon"/></svg></button>
+      </header>
+
+      <div class="hello">
+        <h1 class="brand" data-ih="hello">Привет!<br>Это Aura</h1>
+        <p class="lead" data-i="lead">Видеочат с людьми со всего мира. Один свайп — и новый собеседник.</p>
+        <div class="room-banner" id="room-banner" hidden></div>
+        <div class="pills-row"><div class="pill"><span class="dot"></span><b id="online-onboard">—</b><span data-i="online">онлайн</span></div><div class="pill event-pill" id="event-teaser" hidden></div></div>
+      </div>
+
+      <div class="tiles" id="gender-seg">
+        <button data-v="m"><svg><use href="#i-male"/></svg><b data-i="guy">Парень</b><small data-i="thats_me">это я</small></button>
+        <button data-v="f"><svg><use href="#i-female"/></svg><b data-i="girl">Девушка</b><small data-i="thats_me">это я</small></button>
+      </div>
+
+      <div class="field">
+        <div class="label" data-i="langs_label">На каких языках общаемся</div>
+        <div class="chips" id="lang-chips"></div>
+      </div>
+
+      <label class="consent">
+        <input type="checkbox" id="consent">
+        <span class="box"><svg><use href="#i-check"/></svg></span>
+        <span data-ih="consent">Мне есть 18 лет. Принимаю <a href="terms.html" target="_blank">правила</a> и <a href="privacy.html" target="_blank">политику конфиденциальности</a>.</span>
+      </label>
+
+      <button id="start" class="btn-grad" disabled><span data-i="start">Начать</span><svg><use href="#i-next"/></svg></button>
+      <p id="cam-error" class="cam-error" hidden></p>
+
+      <ul class="perks">
+        <li><svg><use href="#i-shield"/></svg><span data-i="perk_mod">Автомодерация 18+</span></li>
+        <li><svg><use href="#i-eye-off"/></svg><span data-i="perk_rec">Без записи видео</span></li>
+      </ul>
+      <div class="home-bar"></div>
+    </div>
+  </main>
+
+  <!-- Видеочат: видео на весь экран, управление — плавающее стекло -->
+  <main id="chat" class="screen" hidden>
+    <div class="stage" id="stage">
+      <video id="self-bg" autoplay playsinline muted aria-hidden="true"></video>
+      <video id="remote" autoplay playsinline></video>
+      <div class="swipe-hint lg" id="swipe-hint"><svg><use href="#i-next"/></svg></div>
+
+      <!-- Режим «Сначала голос»: аура дышит в такт голосу собеседника, лицо проявляется постепенно -->
+      <div class="reveal" id="reveal" hidden>
+        <div class="voice-aura" id="voice-aura"><span></span><span></span><span></span><b id="reveal-flag"></b></div>
+        <p class="reveal-hint" data-i="reveal_hint">🎧</p>
+        <button class="btn-pill lg" id="reveal-btn" data-i="reveal_btn">👀</button>
+      </div>
+
+      <!-- Поиск / соединение / пауза: поверх своей размытой камеры -->
+      <div class="searching" id="searching">
+        <div class="dial">
+          <svg class="dial-arc" viewBox="0 0 200 200" aria-hidden="true">
+            <circle cx="100" cy="100" r="88" class="track"/>
+            <circle cx="100" cy="100" r="88" class="arc"/>
+          </svg>
+          <div class="knob lg"><svg><use href="#i-spark"/></svg></div>
+        </div>
+        <div class="search-title" id="search-title">Ищем собеседника</div>
+        <div class="search-sub" id="search-sub" data-i="swipe_hint">Свайп влево — следующий</div>
+        <button class="btn-pill lg" id="resume" hidden data-i="resume">Продолжить поиск</button>
+        <div class="rate lg" id="rate" hidden>
+          <span data-i="rate_q">Как прошлый собеседник?</span>
+          <div class="rate-btns">
+            <button data-v="-1" aria-label="Плохо">👎</button>
+            <button data-v="1" class="plus">✨ +aura</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="pip lg" id="pip">
+        <video id="local" autoplay playsinline muted></video>
+      </div>
+
+      <div class="messages" id="messages"></div>
+    </div>
+
+    <header class="topbar">
+      <div class="top-left">
+        <div class="pill lg"><span class="dot"></span><b id="online">—</b></div>
+        <button class="pill lg me-pill" id="me-pill">✨<b id="aura-val">100</b><span id="streak-val" hidden></span><span id="passport-val">🛂0</span></button>
+      </div>
+      <div class="top-actions lg">
+        <button class="icon-btn" id="filter-btn" aria-label="Настройки"><svg><use href="#i-filter"/></svg></button>
+        <button class="icon-btn gold" id="premium-btn" aria-label="Premium"><svg><use href="#i-crown"/></svg></button>
+        <button class="icon-btn danger" id="report-btn" aria-label="Пожаловаться"><svg><use href="#i-flag"/></svg></button>
+      </div>
+    </header>
+    <div class="peer-chip lg" id="peer-chip" hidden></div>
+    <div class="banners">
+      <div class="banner lg" id="event-banner" hidden></div>
+      <div class="banner lg" id="room-chip" hidden></div>
+    </div>
+
+    <div class="rail" id="rail">
+      <button class="rail-btn lg vibe" id="vibe-btn" aria-label="Вайб"><svg><use href="#i-spark"/></svg><span data-i="vibe">Вайб</span></button>
+      <button class="rail-btn lg" id="games-btn" aria-label="Игры"><i>🎲</i><span data-i="games">Игры</span></button>
+      <button class="rail-btn lg" id="mask-btn" aria-label="Маска"><i>🎭</i><span data-i="mask">Маска</span></button>
+    </div>
+
+    <div class="game-layer" id="game-layer" hidden></div>
+
+    <footer class="bottom" id="bottom">
+      <form class="composer lg" id="composer" hidden>
+        <input id="chat-input" maxlength="300" autocomplete="off" placeholder="Сообщение…" data-iph="message_ph" enterkeyhint="send">
+        <button type="submit" class="send" aria-label="Отправить"><svg><use href="#i-send"/></svg></button>
+      </form>
+      <nav class="dock lg">
+        <button class="dock-btn" id="chat-btn" aria-label="Чат"><svg><use href="#i-chat"/></svg></button>
+        <button class="dock-btn" id="mic-btn" aria-label="Микрофон"><svg><use href="#i-mic"/></svg></button>
+        <button class="next" id="next-btn"><span data-i="next">Далее</span><svg><use href="#i-next"/></svg></button>
+        <button class="dock-btn" id="flip-btn" aria-label="Сменить камеру"><svg><use href="#i-flip"/></svg></button>
+        <button class="dock-btn" id="pause-btn" aria-label="Пауза"><svg><use href="#i-pause"/></svg></button>
+      </nav>
+    </footer>
+  </main>
+
+  <!-- Бан -->
+  <main id="banned" class="screen" hidden>
+    <div class="panel lg onboard center">
+      <div class="badge muted"><svg><use href="#i-shield"/></svg></div>
+      <h1 class="brand" data-ih="banned_title">Доступ<br>ограничен</h1>
+      <p class="lead" id="banned-text" data-i="banned_text">Аккаунт заблокирован за нарушение правил.</p>
+    </div>
+  </main>
+
+  <!-- Листы -->
+  <div class="scrim" id="scrim" hidden></div>
+
+  <section class="lg sheet" id="sheet-report" hidden>
+    <div class="grip"></div>
+    <h2 data-i="report_title">Что не так?</h2>
+    <p class="sheet-sub" data-i="report_sub">Собеседник не узнает, кто пожаловался.</p>
+    <div class="list">
+      <button data-reason="nudity"><i>🔞</i><span data-i="r_nudity">Обнажёнка или 18+</span></button>
+      <button data-reason="minor"><i>🧒</i><span data-i="r_minor">Похоже на несовершеннолетнего</span></button>
+      <button data-reason="abuse"><i>🤬</i><span data-i="r_abuse">Оскорбления или угрозы</span></button>
+      <button data-reason="spam"><i>📢</i><span data-i="r_spam">Реклама или спам</span></button>
+    </div>
+  </section>
+
+  <section class="lg sheet" id="sheet-filter" hidden>
+    <div class="grip"></div>
+    <h2 data-i="settings">Настройки</h2>
+    <div class="field">
+      <div class="label" data-i="want_label">Кого ищем</div>
+      <div class="seg" id="want-seg">
+        <button data-v="any" data-i="want_any">Всех</button>
+        <button data-v="f" data-i="want_f">Девушек</button>
+        <button data-v="m" data-i="want_m">Парней</button>
+      </div>
+      <p class="hint" id="filter-sub">Фильтр доступен в Premium</p>
+    </div>
+    <div class="field">
+      <div class="label" data-i="langs_short">Языки общения</div>
+      <div class="chips" id="lang-chips-2"></div>
+    </div>
+    <div class="field">
+      <div class="label" data-i="i_am">Я —</div>
+      <div class="seg" id="gender-seg-2">
+        <button data-v="m" data-i="guy">Парень</button>
+        <button data-v="f" data-i="girl">Девушка</button>
+      </div>
+    </div>
+    <div class="field">
+      <div class="label" data-i="theme">Оформление</div>
+      <div class="seg" id="theme-seg">
+        <button data-v="auto" data-i="auto">Авто</button>
+        <button data-v="light" data-i="light">Светлая</button>
+        <button data-v="dark" data-i="dark">Тёмная</button>
+      </div>
+    </div>
+    <div class="field">
+      <div class="label" data-i="notify_label">Напоминать об Aura Hour</div>
+      <div class="seg" id="notify-seg">
+        <button data-v="1">Да</button>
+        <button data-v="0">Нет</button>
+      </div>
+    </div>
+    <div class="field">
+      <div class="label" data-i="mode_label">Как начинать разговор</div>
+      <div class="seg" id="mode-seg">
+        <button data-v="video" data-i="mode_video">Сразу видео</button>
+        <button data-v="voice" data-i="mode_voice">Сначала голос</button>
+      </div>
+    </div>
+    <div class="field">
+      <div class="label" data-i="maskdef_label">Начинать разговор в маске 🎭</div>
+      <div class="seg" id="maskdef-seg">
+        <button data-v="1">Да</button>
+        <button data-v="0">Нет</button>
+      </div>
+    </div>
+    <div class="extras">
+      <button class="list-btn" id="invite-btn2"><i>🎁</i><span data-i="invite_short">Пригласить друга — Premium обоим</span></button>
+      <button class="list-btn" id="status-btn" hidden><i>✨</i><span data-i="status_btn">Поставить статус «в Aura»</span></button>
+      <button class="list-btn" id="home-btn" hidden><i>📲</i><span data-i="home_btn">Добавить на главный экран</span></button>
+    </div>
+  </section>
+
+  <section class="lg sheet center" id="sheet-premium" hidden>
+    <div class="grip"></div>
+    <div class="badge gold"><svg><use href="#i-crown"/></svg></div>
+    <h2>Premium</h2>
+    <p class="sheet-sub" id="premium-status" data-i="premium_sub">Больше совпадений — меньше пролистываний</p>
+    <ul class="features">
+      <li><i><svg><use href="#i-check"/></svg></i><span data-i="f_filter">Фильтр: только девушки или только парни</span></li>
+      <li><i><svg><use href="#i-check"/></svg></i><span data-i="f_priority">Приоритет в очереди — находим быстрее</span></li>
+      <li><i><svg><use href="#i-check"/></svg></i><span data-i="f_support">Поддержка развития сервиса</span></li>
+    </ul>
+    <div class="plans" id="plans"></div>
+    <button class="btn-grad" id="buy-btn"><span data-i="pay">Оплатить звёздами</span></button>
+    <p class="fine" data-i="pay_fine">Оплата через Telegram Stars. Без автопродления.</p>
+    <button class="invite" id="invite-btn"><i>🎁</i><span><b data-i="invite_title">Пригласи друга</b><small data-i="invite_sub">и получите Premium на сутки оба</small></span></button>
+  </section>
+
+  <section class="lg sheet center" id="sheet-passport" hidden>
+    <div class="grip"></div>
+    <div class="badge">🛂</div>
+    <h2 data-i="passport">Паспорт Aura</h2>
+    <p class="sheet-sub" id="passport-sub"></p>
+    <div class="stamps" id="stamps"></div>
+    <p class="fine" id="aura-line"></p>
+    <button class="btn-grad" id="passport-share"><span data-i="passport_share">Поделиться</span></button>
+  </section>
+
+  <section class="lg sheet" id="sheet-games" hidden>
+    <div class="grip"></div>
+    <h2 data-i="games">Игры</h2>
+    <p class="sheet-sub" data-i="games_sub">Собеседник получит приглашение</p>
+    <div class="list">
+      <button data-game="topic"><i>💬</i><span><b data-i="g_topic">Тема для разговора</b><small data-i="g_topic_sub">Случайный вопрос вам обоим</small></span></button>
+      <button data-game="rps"><i>✊</i><span><b data-i="g_rps">Камень · ножницы · бумага</b><small data-i="g_rps_sub">До двух побед</small></span></button>
+      <button data-game="nolaugh"><i>😐</i><span><b data-i="g_nolaugh">Не смейся</b><small data-i="g_nolaugh_sub">Кто первый улыбнётся — проиграл</small></span></button>
+    </div>
+  </section>
+
+  <section class="lg sheet center" id="sheet-vibe" hidden>
+    <div class="grip"></div>
+    <div class="badge vibe-badge"><svg><use href="#i-spark"/></svg></div>
+    <h2 data-i="vibe_title">Взаимный вайб!</h2>
+    <p class="sheet-sub" id="vibe-text">Вы оба хотите продолжить общение</p>
+    <button class="btn-grad" id="vibe-write"><span data-i="vibe_write">Написать в Telegram</span></button>
+    <p class="fine" id="vibe-fine">Контакт также придёт в чат с ботом</p>
+  </section>
+
+  <section class="lg sheet center" id="sheet-promo" hidden>
+    <div class="grip"></div>
+    <div class="badge" id="promo-icon">📲</div>
+    <h2 id="promo-title" data-i="promo_title">Aura на главном экране</h2>
+    <p class="sheet-sub" id="promo-text" data-i="promo_text">Открывайте в одно касание, как обычное приложение</p>
+    <button class="btn-grad" id="promo-ok"><span data-i="add">Добавить</span></button>
+  </section>
+
+  <section class="lg sheet center" id="sheet-warning" hidden>
+    <div class="grip"></div>
+    <div class="badge warn">⚠️</div>
+    <h2 data-i="warn_title">Предупреждение</h2>
+    <p class="sheet-sub" id="warning-text">Система заметила недопустимый контент. Собеседник отключён.</p>
+    <button class="btn-grad" id="warning-ok"><span data-i="ok">Понятно</span></button>
+  </section>
+
+  <div class="toasts" id="toasts"></div>
+
+  <script src="i18n.js"></script>
+  <script src="face.js"></script>
+  <script src="mask.js"></script>
+  <script src="games.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

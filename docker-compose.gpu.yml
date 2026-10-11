@@ -1,0 +1,15 @@
+# Модерация на NVIDIA GPU (нужен nvidia-container-toolkit):
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
+services:
+  moderation:
+    build:
+      context: ./moderation
+      args:
+        TORCH_INDEX: https://download.pytorch.org/whl/cu124
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
