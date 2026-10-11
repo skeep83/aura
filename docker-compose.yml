@@ -1,25 +1,7 @@
 # Весь сервис одной командой: docker compose up -d
 # Настройки — в .env (создаётся deploy/install.sh или вручную по .env.example)
 services:
-  app:
-    build: .
-    restart: unless-stopped
-    env_file: .env
-    environment:
-      DATA_DIR: /data
-      MODERATION_URL: ${MODERATION_URL:-http://moderation:8000}
-    volumes:
-      - app-data:/data
-    depends_on:
-      moderation:
-        condition: service_started
-
-  moderation:
-    build: ./moderation
-    restart: unless-stopped
-    environment:
-      MODERATION_TOKEN: ${MODERATION_TOKEN}
-
+  # HTTPS: Caddy сам выпускает сертификат Let's Encrypt для APP_DOMAIN и отдаёт всё во фронтенд
   caddy:
     image: caddy:2.8-alpine
     restart: unless-stopped
@@ -33,7 +15,38 @@ services:
       - caddy-data:/data
       - caddy-config:/config
     depends_on:
-      - app
+      - web
+
+  # Фронтенд: nginx отдаёт Mini App и проксирует /ws, /api, /s, /healthz в бэкенд
+  web:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    volumes:
+      - ./public:/usr/share/nginx/html:ro
+      - ./deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - api
+
+  # Бэкенд: WebSocket, подбор пар, бот, база SQLite
+  api:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATA_DIR: /data
+      SERVE_STATIC: "0"
+      MODERATION_URL: ${MODERATION_URL:-http://moderation:8000}
+    volumes:
+      - app-data:/data
+    depends_on:
+      - moderation
+
+  # Модерация: NSFW + оценка возраста по лицу (CPU; для GPU — docker-compose.gpu.yml)
+  moderation:
+    build: ./moderation
+    restart: unless-stopped
+    environment:
+      MODERATION_TOKEN: ${MODERATION_TOKEN}
 
   # TURN-ретранслятор для тех, кто за NAT/CGNAT (мобильные сети). Нужен host-network ради UDP-диапазона.
   coturn:

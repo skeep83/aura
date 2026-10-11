@@ -1,7 +1,7 @@
 # Caddy сам выпускает и продлевает HTTPS-сертификат Let's Encrypt
 {$APP_DOMAIN} {
 	encode zstd gzip
-	reverse_proxy app:8080
+	reverse_proxy web:80
 	header {
 		Strict-Transport-Security "max-age=31536000"
 		-Server
