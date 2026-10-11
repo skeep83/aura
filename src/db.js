@@ -24,6 +24,9 @@ const USER_COLUMNS = {
   last_seen: 'INTEGER NOT NULL DEFAULT 0',
   lang: "TEXT NOT NULL DEFAULT ''",
   reveal: 'INTEGER NOT NULL DEFAULT 0',
+  aura_bonus: 'INTEGER NOT NULL DEFAULT 0',
+  salutes: 'INTEGER NOT NULL DEFAULT 0',
+  salutes_received: 'INTEGER NOT NULL DEFAULT 0',
   country: "TEXT NOT NULL DEFAULT ''",
 };
 
@@ -90,6 +93,14 @@ export class Db {
         at INTEGER NOT NULL
       );
       CREATE INDEX IF NOT EXISTS events_type_at ON events (type, at);
+      CREATE INDEX IF NOT EXISTS events_user_at ON events (user_id, at);
+      CREATE TABLE IF NOT EXISTS compliments (
+        target TEXT NOT NULL,
+        from_id TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS compliments_target ON compliments (target, at);
     `);
     const have = new Set(this.db.prepare('PRAGMA table_info(users)').all().map(c => c.name));
     for (const [col, def] of Object.entries(USER_COLUMNS)) {
@@ -210,13 +221,72 @@ export class Db {
     return until;
   }
 
+  // Запись платежа; true — новый (повторная доставка того же charge_id игнорируется)
+  recordPayment({ chargeId, userId, plan, stars }, now = Date.now()) {
+    return this.db.prepare('INSERT OR IGNORE INTO payments (charge_id, user_id, plan, stars, at) VALUES (?, ?, ?, ?, ?)')
+      .run(chargeId, userId, plan, stars, now).changes > 0;
+  }
+
   // Начисляет премиум; повторная доставка того же платежа игнорируется.
   addPayment({ chargeId, userId, plan, stars, days }, now = Date.now()) {
-    const res = this.db.prepare(
-      'INSERT OR IGNORE INTO payments (charge_id, user_id, plan, stars, at) VALUES (?, ?, ?, ?, ?)')
-      .run(chargeId, userId, plan, stars, now);
-    if (!res.changes) return this.user(userId).premium_until;
+    if (!this.recordPayment({ chargeId, userId, plan, stars }, now)) return this.user(userId).premium_until;
     return this.grantPremium(userId, days, now);
+  }
+
+  // ---------- Салюты: покупаются пачками, получатель копит счётчик ----------
+  addSalutes(id, n) { this.user(id); this.db.prepare('UPDATE users SET salutes = salutes + ? WHERE id = ?').run(n, id); }
+  spendSalute(id) { return this.db.prepare('UPDATE users SET salutes = salutes - 1 WHERE id = ? AND salutes > 0').run(id).changes > 0; }
+  receiveSalute(id) {
+    this.user(id);
+    this.db.prepare('UPDATE users SET salutes_received = salutes_received + 1 WHERE id = ?').run(id);
+    return this.db.prepare('SELECT salutes_received AS n FROM users WHERE id = ?').get(id).n;
+  }
+  addAuraBonus(id, n) { this.user(id); this.db.prepare('UPDATE users SET aura_bonus = aura_bonus + ? WHERE id = ?').run(n, id); }
+
+  // ---------- Комплименты: один от человека человеку в сутки ----------
+  compliment(fromId, target, kind, now = Date.now()) {
+    if (fromId === target) return false;
+    const recent = this.db.prepare('SELECT 1 FROM compliments WHERE from_id = ? AND target = ? AND at > ?').get(fromId, target, now - DAY);
+    if (recent) return false;
+    this.db.prepare('INSERT INTO compliments (target, from_id, kind, at) VALUES (?, ?, ?, ?)').run(target, fromId, kind, now);
+    return true;
+  }
+  complimentsOf(id, since = 0) {
+    const out = {};
+    for (const r of this.db.prepare('SELECT kind, COUNT(*) AS n FROM compliments WHERE target = ? AND at > ? GROUP BY kind').all(id, since)) out[r.kind] = r.n;
+    return out;
+  }
+
+  // ---------- Aura Wrapped: итоги недели и «тип ауры» ----------
+  wrapped(id, now = Date.now()) {
+    const since = now - 7 * DAY;
+    const one = (sql, ...a) => this.db.prepare(sql).get(...a).n;
+    const chats = one("SELECT COUNT(*) AS n FROM events WHERE user_id = ? AND type = 'match' AND at > ?", id, since);
+    const talkMs = one("SELECT COALESCE(SUM(value), 0) AS n FROM events WHERE user_id = ? AND type = 'talk' AND at > ?", id, since);
+    const vibes = one("SELECT COUNT(*) AS n FROM events WHERE user_id = ? AND type = 'vibe_match' AND at > ?", id, since);
+    const countries = this.db.prepare('SELECT country FROM passport WHERE user_id = ? AND first_at > ? ORDER BY first_at').all(id, since).map(r => r.country);
+    const compl = this.complimentsOf(id, since);
+    const topCompl = Object.entries(compl).sort((a, b) => b[1] - a[1])[0]?.[0] || null;
+    const minutes = Math.round(talkMs / 60000);
+    const avgMin = chats ? talkMs / chats / 60000 : 0;
+    // Тип ауры: первое подходящее правило
+    const archetype =
+      countries.length >= 5 ? 'traveler'
+      : vibes >= 3 ? 'magnet'
+      : topCompl === 'funny' ? 'soul'
+      : topCompl === 'voice' || avgMin >= 3 ? 'voice'
+      : topCompl === 'smart' || topCompl === 'world' ? 'thinker'
+      : topCompl === 'kind' ? 'warm'
+      : topCompl === 'smile' ? 'sunny'
+      : chats >= 30 ? 'tireless'
+      : 'newbie';
+    return { chats, minutes, vibes, countries, compliments: compl, topCompl, archetype };
+  }
+
+  // Кому прислать недельные итоги: разрешили писать, заходили за неделю
+  weeklyAudience(now = Date.now()) {
+    return this.db.prepare(`SELECT id, lang FROM users WHERE allows_pm = 1 AND last_seen > ? AND banned_until <= ? AND id NOT LIKE 'dev-%'`)
+      .all(now - 7 * DAY, now);
   }
 
   payment(chargeId) {

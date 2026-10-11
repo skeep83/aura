@@ -88,6 +88,8 @@
   let emojiStatusId = null;
   let freePerDay = 10;
   let maskOn = store.get('maskDefault') === '1';
+  let invoiceKind = 'premium';
+  let wrappedShown = false;
 
   // Языки: флаг и самоназвание
   const LANG_META = {
@@ -164,6 +166,7 @@
       facing = want;
       el.pip.classList.toggle('rear', facing === 'environment');
       if (!maskOn) await pc?.getSenders().find(x => x.track?.kind === 'video' || x.track === null)?.replaceTrack(track);
+      if (!maskOn && duo.active) duo.replaceVideo(track);
       haptic();
     } catch {
       toast(t('no_second_cam'));
@@ -206,6 +209,11 @@
     peerInfo = null;
     matchedAt = 0;
     stopReveal();
+    stopGuess();
+    $('moment-ask').hidden = true;
+    $('countdown').hidden = true;
+    momentPending = false;
+    if (!duo.active) { $('react-bar').hidden = true; $('react-btn').classList.remove('on'); }
   }
 
   async function startPeer(initiator, peer, reveal = false) {
@@ -236,6 +244,7 @@
         setOverlay(null);
         if (reveal) startReveal(peer);
         else setTimeout(() => el.remote.classList.remove('veil'), 1500); // первые секунды размыто — как в Azar
+        if (peer?.guess) startGuess(peer.guess);
         haptic('medium');
         const who = peer?.gender === 'f' ? t('peer_f') : peer?.gender === 'm' ? t('peer_m') : '';
         const lang = (peer?.langs || []).map(l => LANG_META[l]?.[0]).filter(Boolean).join(' ');
@@ -315,11 +324,14 @@
     ws = new WebSocket(`${proto}://${location.host}/ws`);
     ws.onopen = () => send({
       t: 'auth', initData: tg?.initData || '',
-      ...(tg?.initData ? {} : { devId: devId(), startParam: new URLSearchParams(location.search).get('startapp') || '' }),
+      ...(tg?.initData ? {} : { devId: devId(), startParam: new URLSearchParams(location.search).get('startapp') || '', devCountry: new URLSearchParams(location.search).get('country') || '' }),
     });
     ws.onmessage = e => handle(JSON.parse(e.data));
     ws.onclose = ev => {
       closePeer();
+      duo.stop();
+      duoInfo = null;
+      renderDuo();
       if (ev.code === 4004 || state === 'banned') return;
       if (ev.code === 4003) { toast(t('open_via_bot'), 6000); return; }
       if (ev.code === 4005 && ev.reason === 'replaced') {
@@ -353,6 +365,7 @@
         setRoom(msg.room);
         if (msg.referred) toast(t('referred'), 4000);
         setupExtras();
+        if (msg.openWrapped && !wrappedShown) { wrappedShown = true; setTimeout(openWrapped, 600); }
         if (state === 'waiting' || state === 'connecting' || state === 'talking') send({ t: 'find' });
         break;
       case 'me': setMe(msg.me); break;
@@ -394,9 +407,9 @@
         haptic('success');
         break;
       case 'invoice':
-        if (msg.dev) { toast('DEV: Premium выдан без оплаты'); closeSheet(); break; }
+        if (msg.dev) { toast('DEV: покупка без оплаты'); closeSheet(); break; }
         tg?.openInvoice?.(msg.url, status => {
-          if (status === 'paid') { closeSheet(); toast(t('premium_on')); haptic('success'); }
+          if (status === 'paid') { closeSheet(); toast(t(invoiceKind === 'salute' ? 'salutes_added' : 'premium_on')); haptic('success'); }
           else if (status === 'failed') toast(t('pay_failed'));
         });
         break;
@@ -436,9 +449,22 @@
       case 'game':
         if (msg.data?.g === 'mask') { toast(t(msg.data.on ? 'peer_masked' : 'peer_unmasked'), 2200); break; }
         if (msg.data?.g === 'reveal') { onPeerReveal(); break; }
+        if (msg.data?.g === 'moment') { onMoment(msg.data); break; }
         games.onMessage(msg.data || {});
         break;
       case 'banned': onBanned(msg.until, msg.reason); break;
+      case 'react': onReact(msg.kind); break;
+      case 'need_salutes': openSalutes(); break;
+      case 'guess_result': onGuessResult(msg); break;
+      case 'complimented': toast(t(msg.dup ? 'compl_dup' : 'complimented'), 2200); break;
+      case 'compliment':
+        toast(t('compl_got', { what: `${COMPL_EMOJI[msg.kind] || '✨'} ${t('c_' + msg.kind)}` }), 3500);
+        haptic('success');
+        break;
+      case 'wrapped': renderWrapped(msg.data); break;
+      case 'duo': case 'duo_waiting': case 'duo_matched': case 'duo_signal': case 'duo_ended': case 'duo_error':
+        onDuoMessage(msg);
+        break;
     }
   }
 
@@ -470,6 +496,8 @@
     $('streak-val').hidden = !me.streak;
     $('streak-val').textContent = me.streak ? `🔥${me.streak}` : '';
     renderPassportPill();
+    $('salute-n').textContent = me.salutes || 0;
+    renderComplBoard();
     for (const b of $('mode-seg').children) b.classList.toggle('on', b.dataset.v === (me.reveal ? 'voice' : 'video'));
     for (const b of $('notify-seg').children) b.classList.toggle('on', b.dataset.v === (me.notifyEvents ? '1' : '0'));
     if (me.langs?.length) { myLangs = me.langs; renderLangs(); }
@@ -556,6 +584,7 @@
     } catch {}
   }
   $('vibe-btn').onclick = () => {
+    if (duo.active) return toast(t('duo_only_1v1'));
     if (state !== 'talking') return;
     const b = $('vibe-btn');
     if (b.classList.contains('on')) return;
@@ -597,7 +626,9 @@
   function openPassport() {
     const list = me.passport || [];
     $('passport-sub').textContent = t('passport_sub', { n: list.length, countries: tn('countries', list.length) });
-    $('aura-line').textContent = t('aura_info', { n: me.aura ?? 100 }) + (me.streak ? t('streak_info', { n: me.streak, days: tn('days', me.streak) }) : '');
+    $('aura-line').textContent = t('aura_info', { n: me.aura ?? 100 }) + (me.streak ? t('streak_info', { n: me.streak, days: tn('days', me.streak) }) : '')
+      + (me.salutesReceived ? ` · 🎆 ${me.salutesReceived}` : '');
+    renderComplBoard();
     const wrap = $('stamps');
     if (!list.length) {
       const e = document.createElement('div'); e.className = 'empty'; e.textContent = t('passport_empty'); wrap.replaceChildren(e);
@@ -757,6 +788,7 @@
     if (on) mask.enable(); else mask.disable();
     el.local.srcObject = on ? new MediaStream([mask.track]) : localStream;
     el.local.play().catch(() => {});
+    if (duo.active) duo.replaceVideo(on ? mask.track : localStream.getVideoTracks()[0]);
     const sender = pc?.getSenders().find(x => x.track?.kind === 'video');
     if (sender) {
       await sender.replaceTrack(on ? mask.track : localStream.getVideoTracks()[0]).catch(() => {});
@@ -773,6 +805,7 @@
     onResult: shareStory,
   });
   $('games-btn').onclick = () => {
+    if (duo.active) return toast(t('duo_only_1v1'));
     if (state !== 'talking') return toast(t('games_only_call'));
     openSheet('sheet-games');
   };
@@ -846,11 +879,453 @@
     }
   }
 
+  // ---------- Реакции поверх видео ----------
+  const REACT_EMOJI = { heart: '❤️', laugh: '😂', fire: '🔥', clap: '👏', salute: '🎆' };
+  function flyEmoji(kind, mine = false) {
+    const fx = $('fx');
+    const n = kind === 'salute' ? 1 : 3;
+    for (let i = 0; i < n; i++) {
+      const s = document.createElement('span');
+      s.className = 'fly' + (mine ? ' mine' : '');
+      s.textContent = REACT_EMOJI[kind] || '✨';
+      s.style.setProperty('--x', `${(mine ? 62 : 18) + Math.random() * 20}%`);
+      s.style.setProperty('--drift', `${(Math.random() - .5) * 80}px`);
+      s.style.animationDelay = `${i * 140}ms`;
+      fx.append(s);
+      setTimeout(() => s.remove(), 2600 + i * 140);
+    }
+    if (kind === 'salute') fireworks();
+  }
+  // Салют: три вспышки из частиц в разных точках экрана
+  function fireworks() {
+    const fx = $('fx');
+    const colors = ['#ffd166', '#ff6b9a', '#6ee7ff', '#a78bfa', '#7cf29c'];
+    for (let b = 0; b < 3; b++) {
+      const burst = document.createElement('div');
+      burst.className = 'burst';
+      burst.style.left = `${20 + Math.random() * 60}%`;
+      burst.style.top = `${18 + Math.random() * 40}%`;
+      burst.style.animationDelay = `${b * 280}ms`;
+      for (let i = 0; i < 22; i++) {
+        const p = document.createElement('i');
+        const a = (i / 22) * Math.PI * 2, r = 90 + Math.random() * 90;
+        p.style.setProperty('--dx', `${Math.cos(a) * r}px`);
+        p.style.setProperty('--dy', `${Math.sin(a) * r}px`);
+        p.style.background = colors[(i + b) % colors.length];
+        p.style.animationDelay = `${b * 280}ms`;
+        burst.append(p);
+      }
+      fx.append(burst);
+      setTimeout(() => burst.remove(), 2200 + b * 280);
+    }
+  }
+  function canReact() { return state === 'talking' || duo.active; }
+  $('react-btn').onclick = () => {
+    if (!canReact()) return toast(t('react_only_call'));
+    const bar = $('react-bar');
+    bar.hidden = !bar.hidden;
+    $('react-btn').classList.toggle('on', !bar.hidden);
+    haptic();
+  };
+  let lastReactAt = 0;
+  function react(kind) {
+    if (!canReact()) return;
+    const now = Date.now();
+    if (now - lastReactAt < 320) return;
+    lastReactAt = now;
+    if (kind === 'salute' && !(me.salutes > 0)) return openSalutes();
+    send({ t: 'react', kind });
+    flyEmoji(kind, true);
+    haptic(kind === 'salute' ? 'heavy' : 'light');
+    if (kind === 'salute') toast(t('salute_sent'), 1600);
+  }
+  $('react-bar').onclick = e => { const k = e.target.closest('[data-k]')?.dataset.k; if (k) react(k); };
+  // Двойной тап по видео собеседника — ❤️
+  el.stage.addEventListener('dblclick', e => { if (!e.target.closest('#pip, .guess, .moment-ask, .rate')) react('heart'); });
+  function onReact(kind) {
+    flyEmoji(kind);
+    if (kind === 'salute') { toast(t('salute_got'), 2600); haptic('success'); } else haptic('soft');
+  }
+
+  function openSalutes() {
+    $('salutes-left').textContent = t('salutes_left', { n: me.salutes || 0 });
+    const wrap = $('salute-plans');
+    const list = Object.entries(plans).filter(([, p]) => p.kind === 'salute');
+    let pick = list[0]?.[0];
+    wrap.replaceChildren(...list.map(([id, p]) => {
+      const b = document.createElement('button');
+      b.className = 'plan' + (id === pick ? ' on' : '');
+      b.innerHTML = '<div class="p-title"></div><div class="p-price"></div>';
+      b.querySelector('.p-title').textContent = `🎆 × ${p.count}`;
+      b.querySelector('.p-price').textContent = `${p.stars} ⭐`;
+      b.onclick = () => { pick = id; for (const x of wrap.children) x.classList.toggle('on', x === b); haptic(); };
+      return b;
+    }));
+    $('salute-buy').disabled = !paymentsOn || !list.length;
+    $('salute-buy').onclick = () => { invoiceKind = 'salute'; send({ t: 'invoice', plan: pick }); haptic('medium'); };
+    openSheet('sheet-salutes');
+  }
+
+  // ---------- «Угадай, откуда он» ----------
+  let guess = null; // { options, until, timer }
+  function startGuess(g) {
+    stopGuess();
+    if (!g) return;
+    guess = { until: matchedAt + g.seconds * 1000 };
+    const opts = $('guess-opts');
+    opts.replaceChildren(...g.options.map(c => {
+      const b = document.createElement('button');
+      b.dataset.c = c;
+      b.innerHTML = '<i></i><small></small>';
+      b.querySelector('i').textContent = flagOf(c);
+      b.querySelector('small').textContent = countryName(c);
+      return b;
+    }));
+    $('guess-sub').textContent = t('guess_sub');
+    $('guess').hidden = false;
+    const tick = () => {
+      const left = Math.max(0, Math.ceil((guess.until - Date.now()) / 1000));
+      $('guess-timer').textContent = left;
+      if (!left) stopGuess();
+    };
+    tick();
+    guess.timer = setInterval(tick, 250);
+  }
+  function stopGuess() {
+    if (guess) clearInterval(guess.timer);
+    guess = null;
+    $('guess').hidden = true;
+  }
+  $('guess-opts').onclick = e => {
+    const c = e.target.closest('[data-c]')?.dataset.c;
+    if (!c || !guess || guess.picked) return;
+    guess.picked = c;
+    e.target.closest('button').classList.add('picked');
+    send({ t: 'guess', country: c });
+    haptic();
+  };
+  function onGuessResult(msg) {
+    const btns = [...$('guess-opts').children];
+    for (const b of btns) b.classList.toggle('right', b.dataset.c === msg.country);
+    const vars = { flag: flagOf(msg.country), name: countryName(msg.country) };
+    toast(t(msg.ok ? 'guess_ok' : msg.ok === false ? 'guess_no' : 'guess_timeout', vars), 3000);
+    haptic(msg.ok ? 'success' : 'light');
+    if (peerInfo) peerInfo.country = msg.country;
+    setTimeout(stopGuess, msg.ok === null ? 0 : 1200);
+    if (msg.stamp) setTimeout(() => handle({ t: 'stamp', ...msg.stamp }), 1500);
+  }
+
+  // ---------- Комплименты ----------
+  const COMPL_EMOJI = { smile: '😊', funny: '😂', smart: '🧠', kind: '💛', voice: '🎙️', world: '🌍' };
+  function renderComplChips() {
+    $('compl-chips').replaceChildren(...Object.keys(COMPL_EMOJI).map(k => {
+      const b = document.createElement('button');
+      b.className = 'chip';
+      b.dataset.k = k;
+      b.textContent = `${COMPL_EMOJI[k]} ${t('c_' + k)}`;
+      return b;
+    }));
+  }
+  renderComplChips();
+  $('compl-chips').onclick = e => {
+    const k = e.target.closest('[data-k]')?.dataset.k;
+    if (!k) return;
+    send({ t: 'compliment', kind: k });
+    $('rate').hidden = true;
+    haptic('success');
+  };
+  function renderComplBoard() {
+    const c = me.compliments || {};
+    const list = Object.entries(c).sort((a, b) => b[1] - a[1]);
+    const wrap = $('compl-list');
+    if (!list.length) {
+      const e = document.createElement('div'); e.className = 'empty'; e.textContent = t('compl_empty'); wrap.replaceChildren(e);
+      return;
+    }
+    wrap.replaceChildren(...list.map(([k, n]) => {
+      const d = document.createElement('div');
+      d.className = 'chip on';
+      d.textContent = `${COMPL_EMOJI[k] || '✨'} ${t('c_' + k)} · ${n}`;
+      return d;
+    }));
+  }
+
+  // ---------- Aura Moment: общее фото по согласию обоих ----------
+  let momentPending = false;
+  $('moment-btn').onclick = () => {
+    if (duo.active) return toast(t('duo_only_1v1'));
+    if (state !== 'talking') return toast(t('moment_only_call'));
+    if (momentPending) return;
+    momentPending = true;
+    send({ t: 'game', data: { g: 'moment', a: 'req' } });
+    toast(t('moment_wait'), 2500);
+    setTimeout(() => { momentPending = false; }, 15_000);
+    haptic();
+  };
+  function onMoment(data) {
+    if (data.a === 'req') {
+      $('moment-ask').hidden = false;
+      haptic('medium');
+      clearTimeout(onMoment.timer);
+      onMoment.timer = setTimeout(() => { $('moment-ask').hidden = true; }, 12_000);
+    } else if (data.a === 'yes' && momentPending) {
+      momentPending = false;
+      momentCountdown();
+    } else if (data.a === 'no') {
+      momentPending = false;
+      toast(t('moment_no'));
+    }
+  }
+  $('moment-yes').onclick = () => {
+    $('moment-ask').hidden = true;
+    send({ t: 'game', data: { g: 'moment', a: 'yes' } });
+    momentCountdown();
+  };
+  $('moment-no').onclick = () => {
+    $('moment-ask').hidden = true;
+    send({ t: 'game', data: { g: 'moment', a: 'no' } });
+  };
+  function momentCountdown() {
+    const cd = $('countdown');
+    let n = 3;
+    cd.hidden = false;
+    const step = () => {
+      if (state !== 'talking') { cd.hidden = true; return; }
+      if (n === 0) {
+        cd.hidden = true;
+        const flash = $('flash');
+        flash.classList.remove('go'); void flash.offsetWidth; flash.classList.add('go');
+        haptic('heavy');
+        captureMoment();
+        return;
+      }
+      cd.textContent = n;
+      cd.classList.remove('pop'); void cd.offsetWidth; cd.classList.add('pop');
+      haptic('light');
+      n--;
+      setTimeout(step, 800);
+    };
+    step();
+  }
+  // Кадр из видео с обрезкой «cover» под заданные размеры
+  function grab(video, w, h, mirror = false) {
+    const c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    const x = c.getContext('2d');
+    const vw = video.videoWidth, vh = video.videoHeight;
+    if (!vw) { x.fillStyle = '#1b2440'; x.fillRect(0, 0, w, h); return c; }
+    const k = Math.max(w / vw, h / vh), dw = vw * k, dh = vh * k;
+    if (mirror) { x.translate(w, 0); x.scale(-1, 1); }
+    x.drawImage(video, (w - dw) / 2, (h - dh) / 2, dw, dh);
+    return c;
+  }
+  let momentBlob = null, momentUrl = null;
+  async function captureMoment() {
+    const them = grab(el.remote, 860, 640);
+    const mine = grab(el.local, 860, 640, facing === 'user');
+    const c = document.createElement('canvas');
+    c.width = 1080; c.height = 1920;
+    const x = c.getContext('2d');
+    const g = x.createLinearGradient(0, 0, 1080, 1920);
+    g.addColorStop(0, '#36d1f0'); g.addColorStop(0.5, '#4a86f7'); g.addColorStop(1, '#5a4ff0');
+    x.fillStyle = g; x.fillRect(0, 0, 1080, 1920);
+    for (const [cx, cy, r, a] of [[930, 220, 380, .16], [80, 1700, 460, .14]]) {
+      x.fillStyle = `rgba(255,255,255,${a})`; x.beginPath(); x.arc(cx, cy, r, 0, Math.PI * 2); x.fill();
+    }
+    x.fillStyle = '#fff'; x.textAlign = 'center';
+    x.font = '800 60px Montserrat, sans-serif';
+    x.fillText(`${appName.toUpperCase()} MOMENT`, 540, 170);
+    // Два «полароида» с лёгким поворотом
+    const photo = (img, cx, cy, rot, flag) => {
+      x.save(); x.translate(cx, cy); x.rotate(rot);
+      x.shadowColor = 'rgba(10,20,60,.35)'; x.shadowBlur = 40; x.shadowOffsetY = 18;
+      x.fillStyle = '#fff'; x.beginPath(); x.roundRect(-460, -350, 920, 730, 36); x.fill();
+      x.shadowColor = 'transparent';
+      x.save(); x.beginPath(); x.roundRect(-430, -320, 860, 640, 24); x.clip(); x.drawImage(img, -430, -320); x.restore();
+      if (flag) { x.font = '56px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif'; x.fillText(flag, 390, 368); }
+      x.restore();
+    };
+    photo(them, 540, 620, -0.035, peerInfo?.country ? flagOf(peerInfo.country) : '');
+    photo(mine, 540, 1360, 0.03, me.country ? flagOf(me.country) : '');
+    x.fillStyle = '#fff';
+    x.font = '600 40px Montserrat, sans-serif';
+    x.fillText(new Date().toLocaleDateString(LOCALE, { day: 'numeric', month: 'long', year: 'numeric' }), 540, 1830);
+    momentBlob = await new Promise(r => c.toBlob(r, 'image/jpeg', 0.88));
+    if (momentUrl) URL.revokeObjectURL(momentUrl);
+    momentUrl = URL.createObjectURL(momentBlob);
+    $('moment-img').src = momentUrl;
+    openSheet('sheet-moment');
+    haptic('success');
+  }
+  async function uploadCard(blob) {
+    const res = await fetch('/api/story', { method: 'POST', headers: { 'content-type': 'image/jpeg', 'x-init-data': tg?.initData || '' }, body: blob });
+    if (!res.ok) throw new Error(res.status);
+    return (await res.json()).url;
+  }
+  $('moment-share').onclick = async () => {
+    if (!momentBlob) return;
+    try {
+      const url = await uploadCard(momentBlob);
+      if (tg?.initData && tg.isVersionAtLeast?.('7.8')) {
+        const opts = { text: `📸 ${appName} Moment ✨` };
+        if (tg.initDataUnsafe?.user?.is_premium && me.refLink) opts.widget_link = { url: me.refLink, name: appName };
+        tg.shareToStory(url, opts);
+      } else window.open(url, '_blank');
+    } catch { toast(t('story_fail')); }
+  };
+  $('moment-save').onclick = async () => {
+    if (!momentBlob) return;
+    if (tg?.initData && tg.isVersionAtLeast?.('8.0') && tg.downloadFile) {
+      try { tg.downloadFile({ url: await uploadCard(momentBlob), file_name: `aura-moment-${Date.now()}.jpg` }); return; }
+      catch { toast(t('story_fail')); return; }
+    }
+    const a = document.createElement('a');
+    a.href = momentUrl; a.download = `aura-moment-${Date.now()}.jpg`; a.click();
+  };
+
+  // ---------- Aura Wrapped: итоги недели ----------
+  const ARCH = { traveler: '🧭', magnet: '🧲', soul: '🎉', voice: '🎙️', thinker: '🧠', warm: '💛', sunny: '☀️', tireless: '⚡', newbie: '🌱' };
+  let wrappedData = null;
+  function openWrapped() { send({ t: 'wrapped' }); }
+  function renderWrapped(w) {
+    wrappedData = w;
+    $('arch-emoji').textContent = ARCH[w.archetype] || '✨';
+    $('arch-title').textContent = t('a_' + w.archetype);
+    $('arch-desc').textContent = t('a_' + w.archetype + '_d');
+    const stats = [[w.chats, 'wrapped_chats'], [w.minutes, 'wrapped_min'], [w.countries.length, 'wrapped_countries'], [w.vibes, 'wrapped_vibes']];
+    $('wstats').replaceChildren(...stats.map(([n, k]) => {
+      const d = document.createElement('div');
+      d.innerHTML = '<b></b><small></small>';
+      d.querySelector('b').textContent = n.toLocaleString(LOCALE);
+      d.querySelector('small').textContent = t(k);
+      return d;
+    }));
+    $('wrapped-top').textContent = !w.chats ? t('wrapped_empty')
+      : w.topCompl ? t('wrapped_top', { what: `${COMPL_EMOJI[w.topCompl]} ${t('c_' + w.topCompl)}` })
+      : w.countries.length ? w.countries.map(flagOf).join(' ') : '';
+    $('wrapped-share').hidden = !w.chats;
+    openSheet('sheet-wrapped');
+    haptic('success');
+  }
+  $('wrapped-open').onclick = openWrapped;
+  $('wrapped-share').onclick = () => {
+    if (!wrappedData) return;
+    shareStory({ emoji: ARCH[wrappedData.archetype] || '✨', title: t('a_' + wrappedData.archetype), subtitle: t('story_wrapped_sub') });
+  };
+
+  // ---------- Duo «двое на двое» ----------
+  let duoInfo = null; // { code, size, searching, inCall, partner }
+  const duo = window.AuraDuo.create({
+    send,
+    getIce: () => ice,
+    getTracks: () => localStream ? localStream.getTracks().map(tr => ({ track: tr.kind === 'video' && maskOn ? mask.track : tr, stream: localStream })) : [],
+    grid: $('duo-grid'),
+    flagOf,
+    onConnected: () => { if (state !== 'talking') { state = 'talking'; setOverlay(null); haptic('medium'); startFrames(); } },
+  });
+  const duoLink = code => (me.refLink || '').replace(/ref_[\w-]+$/, `duo_${code}`);
+  function renderDuo() {
+    const d = duoInfo;
+    $('duo-none').hidden = Boolean(d);
+    $('duo-have').hidden = !d;
+    const chip = $('duo-chip');
+    chip.hidden = !d;
+    $('chat').classList.toggle('duo-mode', Boolean(d));
+    if (!d) return;
+    const full = d.size >= 2;
+    $('duo-friend').classList.toggle('on', full);
+    $('duo-friend').firstChild.textContent = full ? (d.partner?.country ? flagOf(d.partner.country) : '🙂') : '⏳';
+    $('duo-code-view').textContent = t('duo_code', { code: d.code });
+    $('duo-invite').hidden = full;
+    $('duo-search').hidden = !full;
+    $('duo-status').textContent = full ? t('duo_ready') : t('duo_waiting_friend');
+    chip.replaceChildren(`👫 Duo${full ? '' : ' · ⏳'}`);
+    const out = document.createElement('button');
+    out.textContent = t('duo_leave');
+    out.onclick = () => { send({ t: 'duo_leave' }); haptic(); };
+    chip.append(out);
+  }
+  function duoWaiting() {
+    closePeer();
+    state = 'waiting';
+    setOverlay('waiting');
+    el.searchTitle.textContent = t('duo_searching');
+  }
+  $('duo-open').onclick = () => { renderDuo(); openSheet('sheet-duo'); };
+  $('duo-create').onclick = () => { closePeer(); send({ t: 'duo_create' }); haptic('medium'); };
+  $('duo-join').onsubmit = e => {
+    e.preventDefault();
+    const code = $('duo-code').value.trim().toLowerCase();
+    if (code) { closePeer(); send({ t: 'duo_join', code }); haptic(); }
+  };
+  $('duo-invite').onclick = () => {
+    const url = duoLink(duoInfo?.code);
+    if (!url) return;
+    const text = t('duo_invite_text');
+    if (tg?.initData) tg.openTelegramLink(`https://t.me/share/url?url=${encodeURIComponent(url)}&text=${encodeURIComponent(text)}`);
+    else if (navigator.share) navigator.share({ url, text }).catch(() => {});
+    else { navigator.clipboard?.writeText(url); toast(t('link_copied')); }
+    haptic();
+  };
+  $('duo-search').onclick = () => { closeSheet(); send({ t: 'duo_search' }); duoWaiting(); haptic('medium'); };
+  $('duo-leave').onclick = () => { send({ t: 'duo_leave' }); closeSheet(); haptic(); };
+  function onDuoMessage(msg) {
+    switch (msg.t) {
+      case 'duo': {
+        const was = duoInfo;
+        duoInfo = msg.duo;
+        renderDuo();
+        if (!duoInfo) {
+          duo.stop();
+          if (was) { state = 'idle'; setOverlay('idle'); }
+        } else if (was && was.size === 2 && duoInfo.size === 1) {
+          toast(t('duo_partner_left'));
+          duo.stop();
+          state = 'idle'; setOverlay('idle');
+        } else if (was && was.size === 1 && duoInfo.size === 2) {
+          toast(t('duo_ready'), 2500); haptic('success');
+        } else if (!was) {
+          if (state !== 'onboard') { closePeer(); send({ t: 'stop' }); state = 'idle'; setOverlay('idle'); }
+          if (!openSheetId) openSheet('sheet-duo');
+        }
+        break;
+      }
+      case 'duo_waiting': duoWaiting(); break;
+      case 'duo_matched':
+        closePeer();
+        state = 'connecting';
+        setOverlay('connecting');
+        duo.start(msg);
+        haptic('success');
+        break;
+      case 'duo_signal': duo.onSignal(msg.from, msg.data); break;
+      case 'duo_ended':
+        duo.stop();
+        clearInterval(frameTimer);
+        if (msg.reason === 'next' || msg.reason === 'partner_left' && duoInfo?.size === 2) { duoWaiting(); toast(t('duo_ended'), 2200); }
+        else if (msg.reason === 'moderation') { duoWaiting(); toast(t('moderated_peer')); }
+        else { state = 'idle'; setOverlay('idle'); }
+        break;
+      case 'duo_error':
+        toast(t('duo_' + msg.code));
+        if (msg.code === 'need_partner') openSheet('sheet-duo');
+        break;
+    }
+  }
+
   // ---------- Действия ----------
   function next() {
     if (state === 'banned') return;
     el.next.disabled = true;
     setTimeout(() => { el.next.disabled = false; }, 900);
+    if (duoInfo) {
+      if (duoInfo.size < 2) { openSheet('sheet-duo'); return; }
+      duo.stop();
+      duoWaiting();
+      send({ t: duo.active || duoInfo.inCall ? 'duo_next' : 'duo_search' });
+      haptic();
+      return;
+    }
     closePeer();
     state = 'waiting';
     setOverlay('waiting');
@@ -930,6 +1405,8 @@
   }
 
   $('report-btn').onclick = () => {
+    // В Duo жалоба = немедленный выход из группы; модерация кадров при этом работает как обычно
+    if (duo.active) { next(); return toast(t('duo_reported')); }
     if (state !== 'talking' && state !== 'connecting') return toast(t('report_only_call'));
     openSheet('sheet-report');
   };
@@ -958,7 +1435,7 @@
 
   function openPremium() {
     const wrap = $('plans');
-    wrap.replaceChildren(...Object.entries(plans).map(([id, p]) => {
+    wrap.replaceChildren(...Object.entries(plans).filter(([, p]) => p.kind !== 'salute').map(([id, p]) => {
       const b = document.createElement('button');
       b.className = 'plan' + (id === selectedPlan ? ' on' : '');
       b.dataset.plan = id;
@@ -980,9 +1457,12 @@
     openSheet('sheet-premium');
   }
   el.premiumBtn.onclick = openPremium;
-  $('buy-btn').onclick = () => { send({ t: 'invoice', plan: selectedPlan }); haptic('medium'); };
+  $('buy-btn').onclick = () => { invoiceKind = 'premium'; send({ t: 'invoice', plan: selectedPlan }); haptic('medium'); };
 
-  $('pause-btn').onclick = () => { send({ t: 'stop' }); closePeer(); state = 'idle'; setOverlay('idle'); haptic(); };
+  $('pause-btn').onclick = () => {
+    if (duoInfo) { send({ t: 'duo_stop' }); duo.stop(); } else send({ t: 'stop' });
+    closePeer(); state = 'idle'; setOverlay('idle'); haptic();
+  };
   el.resume.onclick = next;
   el.next.onclick = swipeNext;
   $('flip-btn').onclick = flipCamera;

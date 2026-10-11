@@ -13,6 +13,7 @@ import { normalizeLangs, LANGS } from './langs.js';
 import { EventSchedule, localDay } from './events.js';
 import { StoryStore } from './stories.js';
 import { note } from './bot-profile.js';
+import { DuoManager } from './duo.js';
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const PUBLIC_DIR = path.join(ROOT, 'public');
@@ -53,7 +54,15 @@ const cfg = {
 const plans = {
   week: { title: '7 дней', days: 7, stars: Number(env.PRICE_WEEK_STARS || 75) },
   month: { title: '30 дней', days: 30, stars: Number(env.PRICE_MONTH_STARS || 199) },
+  // Салюты — пачки для реакции «🎆» в звонке; получатель копит счётчик (+aura, каждые 10 — сутки Premium)
+  salute5: { kind: 'salute', title: '5 салютов', count: 5, stars: Number(env.PRICE_SALUTE5_STARS || 25) },
+  salute20: { kind: 'salute', title: '20 салютов', count: 20, stars: Number(env.PRICE_SALUTE20_STARS || 79) },
 };
+const FREE_REACTIONS = ['heart', 'laugh', 'fire', 'clap'];
+const COMPLIMENTS = ['smile', 'funny', 'smart', 'kind', 'voice', 'world'];
+const GUESS_MS = 20_000;
+// Варианты для «Угадай, откуда он»: популярные страны аудитории
+const GUESS_POOL = ['RU', 'UA', 'KZ', 'BY', 'UZ', 'MD', 'RO', 'PL', 'DE', 'FR', 'IT', 'ES', 'PT', 'GB', 'US', 'BR', 'MX', 'AR', 'TR', 'IN', 'ID', 'VN', 'EG', 'GE', 'AM', 'AZ', 'KG', 'IL', 'CZ', 'NL'];
 
 // Без токена сервер не падает (иначе контейнер уходит в цикл перезапусков), а ждёт настройки:
 // страницы открываются, но войти нельзя — initData без токена не проверить.
@@ -88,20 +97,56 @@ function appLink(param) {
 function auraOf(u) {
   const votes = u.karma_up + u.karma_down;
   return {
-    points: Math.max(0, 100 + u.karma_up * 10 - u.karma_down * 15),
+    points: Math.max(0, 100 + u.karma_up * 10 - u.karma_down * 15 + (u.aura_bonus || 0)),
     tier: votes >= 6 && db.karma(u) < 0.4 ? 'low' : 'ok',
   };
 }
 
+// ---------- «Угадай, откуда он»: первые 20 с страна собеседника скрыта ----------
+function shuffle(a) { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
+function guessOptions(answer, mine) {
+  const pool = shuffle(GUESS_POOL.filter(c => c !== answer && c !== mine));
+  return shuffle([answer, ...pool.slice(0, 3)]);
+}
+function finishGuess(c, pick) {
+  const g = c.guess;
+  if (!g || g.done) return;
+  g.done = true;
+  clearTimeout(g.timer);
+  const ok = pick === null ? null : pick === g.answer;
+  if (ok) { db.addAuraBonus(c.id, 10); db.event('guess_ok', c.id); }
+  c.send({ t: 'guess_result', ok, country: g.answer, stamp: g.stamp || null });
+  if (ok) c.send({ t: 'me', me: profileOf(c) });
+}
+
 // ---------- Матчинг: что происходит при начале и конце разговора ----------
+const duos = new DuoManager({
+  onGroupEnd(g, ms) {
+    for (const m of g.members) db.event('talk', m.c.id, ms);
+    db.event('duo_call', '', ms);
+  },
+});
+
 const mm = new Matchmaker({
+  peerInfo(self, o, common) {
+    clearTimeout(self.guess?.timer);
+    self.guess = null;
+    if (self.country && o.country && self.country !== o.country) {
+      self.guess = { answer: o.country, options: guessOptions(o.country, self.country), done: false, stamp: null };
+      return { gender: o.gender, langs: common, country: null, guess: { options: self.guess.options, seconds: GUESS_MS / 1000 } };
+    }
+    return { gender: o.gender, langs: common, country: o.country || null };
+  },
   onPair(a, b, now, waits = [0, 0]) {
     [a, b].forEach((c, i) => db.event('match', c.id, waits[i]));
     // Паспорт: штамп страны собеседника
     for (const [c, o] of [[a, b], [b, a]]) {
       if (o.country && db.stamp(c.id, o.country, now)) {
-        c.send({ t: 'stamp', country: o.country, total: db.passport(c.id).length });
+        const stamp = { country: o.country, total: db.passport(c.id).length };
+        // Во время игры «Угадай» штамп покажем вместе с ответом, иначе он раскроет страну
+        if (c.guess) c.guess.stamp = stamp; else c.send({ t: 'stamp', ...stamp });
       }
+      if (c.guess) c.guess.timer = setTimeout(() => finishGuess(c, null), GUESS_MS);
     }
     for (const c of [a, b]) {
       c.vibe = null;
@@ -126,11 +171,17 @@ const mm = new Matchmaker({
   },
   onUnpair(a, b, durationMs) {
     a.vibe = b.vibe = null;
+    for (const c of [a, b]) { clearTimeout(c.guess?.timer); c.guess = null; }
     db.event('call_end', a.id, durationMs);
+    db.event('talk', a.id, durationMs);
+    db.event('talk', b.id, durationMs);
     if (durationMs < cfg.rateMinSeconds * 1000) return;
     const until = Date.now() + 3 * 60 * 1000;
     a.rateTarget = { id: b.id, until };
     b.rateTarget = { id: a.id, until };
+    // Окно для комплимента — те же 3 минуты после разговора
+    a.complTarget = { id: b.id, until };
+    b.complTarget = { id: a.id, until };
     a.send({ t: 'rate_prompt' });
     b.send({ t: 'rate_prompt' });
   },
@@ -140,8 +191,12 @@ let bot_ = null;
 const bot = cfg.botToken ? (bot_ = createBot({
   token: cfg.botToken, site: { get url() { return cfg.publicUrl; } }, stateFile: path.join(DATA_DIR, 'bot-profile.hash'), appName: cfg.appName, adminIds: cfg.adminIds,
   supportContact: cfg.supportContact, plans, db, appLink, schedule,
-  stats: () => ({ online: clients.size, ...mm.stats(), ...db.stats(), ...db.funnel() }),
+  stats: () => ({ online: clients.size, ...mm.stats(), ...duos.stats(), ...db.stats(), ...db.funnel() }),
   kick: id => kick(id),
+  onSalutes: id => {
+    const c = clients.get(id);
+    if (c) c.send({ t: 'me', me: profileOf(c) });
+  },
   onPremium: (id, until) => {
     const c = clients.get(id);
     if (!c) return;
@@ -192,6 +247,7 @@ function profileOf(c) {
     notifyEvents: Boolean(u.notify_events), allowsPm: Boolean(u.allows_pm),
     refLink: appLink(`ref_${c.id}`), referrals: u.referrals,
     reveal: Boolean(c.reveal), country: c.country || null, passport: db.passport(c.id),
+    salutes: u.salutes, salutesReceived: u.salutes_received, compliments: db.complimentsOf(c.id),
   };
 }
 
@@ -217,6 +273,7 @@ function kick(id) {
   const c = clients.get(id);
   if (!c) return;
   mm.leave(c);
+  duos.leave(c);
   c.send({ t: 'banned', until: db.bannedUntil(id) });
   c.close('banned');
 }
@@ -292,7 +349,7 @@ wss.on('connection', (ws, req) => {
   // Страна пользователя — заголовок Cloudflare (через туннель и nginx)
   const country = String(req.headers['cf-ipcountry'] || '').toUpperCase().slice(0, 2);
   let client = null;
-  let lastNext = 0, lastChat = 0, lastFrame = 0, lastGame = 0;
+  let lastNext = 0, lastChat = 0, lastFrame = 0, lastGame = 0, lastReact = 0;
   ws.isAlive = true;
   ws.on('pong', () => { ws.isAlive = true; });
   const authTimer = setTimeout(() => ws.close(4001, 'auth timeout'), 10_000);
@@ -338,13 +395,15 @@ wss.on('connection', (ws, req) => {
       id: user.id, name: user.name || '', username: user.username || '',
       gender: u.gender, want: u.want, langs: normalizeLangs(u.langs, user.lang),
       premium: db.isPremium(u), room, tier: auraOf(u).tier, vibe: null, rateTarget: null,
-      reveal: Boolean(u.reveal), country: /^[A-Z]{2}$/.test(country) && !['XX', 'T1'].includes(country) ? country : '',
+      reveal: Boolean(u.reveal), country: /^[A-Z]{2}$/.test(country) && !['XX', 'T1'].includes(country) ? country
+        : cfg.devAnon && /^[A-Z]{2}$/.test(msg.devCountry || '') ? msg.devCountry : '',
       minorHist: [],
       send, close: reason => ws.close(4005, reason),
     };
     if (!client.premium && !db.filterLeft(client.id, today(), cfg.freeFilterPerDay)) client.want = 'any';
     clients.set(user.id, client);
     if (client.country) db.setCountry(client.id, client.country);
+    if (sp.startsWith('duo_')) setTimeout(() => clients.get(client.id) === client && onDuo({ t: 'duo_join', code: sp.slice(4) }), 0);
     db.event('session', client.id, 0, sp.startsWith('room_') ? `room:${room || '?'}` : sp.startsWith('ref_') ? 'ref' : '');
     const ice = await iceServers(user.id);
     if (clients.get(user.id) !== client) return;
@@ -352,16 +411,17 @@ wss.on('connection', (ws, req) => {
       t: 'ready', appName: cfg.appName, ice, me: profileOf(client), online: onlineFor(client),
       isNew, referred, room: roomInfo(client), event: eventInfo(), langs: LANGS,
       moderation: moderation.enabled ? { intervalMs: cfg.frameIntervalMs } : null,
-      plans: Object.fromEntries(Object.entries(plans).map(([k, p]) => [k, { title: p.title, stars: p.stars }])),
+      plans: Object.fromEntries(Object.entries(plans).map(([k, p]) => [k, { title: p.title, stars: p.stars, kind: p.kind || 'premium', count: p.count || 0 }])),
       payments: Boolean(bot) || cfg.devAnon, emojiStatusId: cfg.emojiStatusId || null,
-      freeFilterPerDay: cfg.freeFilterPerDay,
+      freeFilterPerDay: cfg.freeFilterPerDay, reactions: FREE_REACTIONS, compliments: COMPLIMENTS,
+      openWrapped: sp === 'wrapped',
     });
   }
 
   async function onFrame(msg) {
     const now = Date.now();
     if (!moderation.enabled || now - lastFrame < cfg.frameIntervalMs * 0.75) return;
-    if (typeof msg.jpg !== 'string' || msg.jpg.length > 200_000 || !mm.peerOf(client)) return;
+    if (typeof msg.jpg !== 'string' || msg.jpg.length > 200_000 || (!mm.peerOf(client) && !duos.groupOf(client))) return;
     lastFrame = now;
     const r = await moderation.score(msg.jpg);
     if (!r || clients.get(client.id) !== client) return;
@@ -373,6 +433,7 @@ wss.on('connection', (ws, req) => {
         console.log(`age block ${client.id} minor=${r.minor.toFixed(2)}`);
         db.event('age_block', client.id, r.minor);
         requeue(mm.leave(client, { t: 'peer_left', reason: 'moderation' }));
+        duos.leave(client);
         const until = db.ban(client.id, cfg.ageBlockHours * HOUR, 'age');
         send({ t: 'banned', until, reason: 'age' });
         return client.close('banned');
@@ -384,6 +445,7 @@ wss.on('connection', (ws, req) => {
     db.event('nsfw', client.id, r.nsfw);
     console.log(`nsfw ${client.id} score=${r.nsfw.toFixed(2)} strikes=${strikes}`);
     requeue(mm.leave(client, { t: 'peer_left', reason: 'moderation' }));
+    if (client.duo?.group) duos.endGroup(client.duo, 'moderation');
     if (strikes >= cfg.strikesToBan) {
       db.ban(client.id, cfg.strikeBanHours * HOUR, 'nsfw');
       return kick(client.id);
@@ -397,9 +459,15 @@ wss.on('connection', (ws, req) => {
       try { send({ t: 'invoice', url: await bot.createInvoiceLink(client.id, msg.plan) }); }
       catch (e) { console.error('invoice:', e.message); send({ t: 'error', code: 'pay_unavailable', text: 'Payments are temporarily unavailable' }); }
     } else if (cfg.devAnon) {
-      // Локальная отладка: премиум без оплаты
-      const until = db.addPayment({ chargeId: 'dev-' + crypto.randomUUID(), userId: client.id, plan: msg.plan, stars: 0, days: plans[msg.plan].days });
-      client.premium = until > Date.now();
+      // Локальная отладка: покупки без оплаты
+      const chargeId = 'dev-' + crypto.randomUUID(), plan = plans[msg.plan];
+      if (plan.kind === 'salute') {
+        db.recordPayment({ chargeId, userId: client.id, plan: msg.plan, stars: 0 });
+        db.addSalutes(client.id, plan.count);
+      } else {
+        const until = db.addPayment({ chargeId, userId: client.id, plan: msg.plan, stars: 0, days: plan.days });
+        client.premium = until > Date.now();
+      }
       send({ t: 'me', me: profileOf(client) });
       send({ t: 'invoice', dev: true });
     }
@@ -413,6 +481,7 @@ wss.on('connection', (ws, req) => {
     db.event('vibe', client.id);
     if (peer.vibe !== client.id) return send({ t: 'vibe_sent' });
     db.event('vibe_match', client.id);
+    db.event('vibe_match', peer.id);
     const card = c => ({ name: c.name || 'Собеседник', username: c.username || null, id: c.id });
     send({ t: 'vibe_match', peer: card(peer) });
     peer.send({ t: 'vibe_match', peer: card(client) });
@@ -431,6 +500,98 @@ wss.on('connection', (ws, req) => {
       if (target) target.tier = auraOf(db.user(t.id)).tier;
     }
     send({ t: 'rated' });
+  }
+
+  // Комплимент после разговора: анонимно, один в сутки на пару, заодно +aura
+  function onCompliment(msg) {
+    const t = client.complTarget;
+    if (!t || Date.now() > t.until || !COMPLIMENTS.includes(msg.kind)) return;
+    client.complTarget = null;
+    if (!db.compliment(client.id, t.id, msg.kind)) return send({ t: 'complimented', dup: true });
+    db.event('compliment', client.id, 0, msg.kind);
+    if (client.rateTarget?.id === t.id) onRate({ v: 1 }); else db.rate(client.id, t.id, 1);
+    send({ t: 'complimented' });
+    const target = clients.get(t.id);
+    if (target) {
+      target.send({ t: 'compliment', kind: msg.kind });
+      target.send({ t: 'me', me: profileOf(target) });
+    } else {
+      const lang = db.langOf(t.id);
+      bot?.notify(t.id, note(lang, 'compliment', { app: cfg.appName, what: note(lang, `c_${msg.kind}`) }));
+    }
+  }
+
+  // Реакции поверх видео собеседника; «салют» — платный, получатель копит бонусы
+  function onReact(msg) {
+    const now = Date.now();
+    if (now - lastReact < 300) return;
+    const kind = String(msg.kind);
+    const group = duos.groupOf(client);
+    const peer = group ? null : mm.peerOf(client);
+    if (!group && !peer) return;
+    if (kind === 'salute') {
+      if (!db.spendSalute(client.id)) return send({ t: 'need_salutes' });
+      lastReact = now;
+      db.event('salute', client.id);
+      const targets = group ? group.members.filter(m => m.c !== client).map(m => m.c) : [peer];
+      for (const tc of targets) {
+        const n = db.receiveSalute(tc.id);
+        db.addAuraBonus(tc.id, 5);
+        if (n % 10 === 0) {
+          db.grantPremium(tc.id, 1);
+          tc.premium = true;
+          bot?.notify(tc.id, note(db.langOf(tc.id), 'salute_premium', { n }));
+        }
+        tc.send({ t: 'me', me: profileOf(tc) });
+      }
+      send({ t: 'me', me: profileOf(client) });
+    } else if (!FREE_REACTIONS.includes(kind)) return;
+    lastReact = now;
+    if (group) duos.broadcast(client, { t: 'react', kind });
+    else peer.send({ t: 'react', kind });
+  }
+
+  function onGuess(msg) {
+    const g = client.guess;
+    if (!g || g.done || !g.options.includes(msg.country)) return;
+    finishGuess(client, msg.country);
+  }
+
+  // Duo «двое на двое»
+  function onDuo(msg) {
+    switch (msg.t) {
+      case 'duo_create':
+        requeue(mm.leave(client));
+        duos.create(client);
+        db.event('duo_create', client.id);
+        break;
+      case 'duo_join': {
+        requeue(mm.leave(client));
+        const r = duos.join(client, msg.code);
+        if (r !== 'ok') send({ t: 'duo_error', code: r });
+        else db.event('duo_join', client.id);
+        break;
+      }
+      case 'duo_search':
+      case 'duo_next': {
+        const now = Date.now();
+        if (now - lastNext < 800) return;
+        lastNext = now;
+        requeue(mm.leave(client));
+        if (!(msg.t === 'duo_next' ? duos.next(client) : duos.search(client))) send({ t: 'duo_error', code: 'need_partner' });
+        break;
+      }
+      case 'duo_stop':
+        if (client.duo) { duos.endGroup(client.duo, 'stopped'); duos.unqueue(client.duo); duos.notify(client.duo); }
+        break;
+      case 'duo_leave':
+        duos.leave(client);
+        send({ t: 'duo', duo: null });
+        break;
+      case 'duo_signal':
+        if (msg.data && typeof msg.data === 'object') duos.relay(client, msg.to, msg.data);
+        break;
+    }
   }
 
   ws.on('message', raw => {
@@ -469,6 +630,7 @@ wss.on('connection', (ws, req) => {
         if (now - lastNext < 800) return; // антиспам «Далее»
         lastNext = now;
         requeue(mm.leave(client));
+        if (client.duo) duos.leave(client);
         mm.enqueue(client);
         break;
       }
@@ -485,9 +647,11 @@ wss.on('connection', (ws, req) => {
         const peer = mm.peerOf(client);
         const text = String(msg.text || '').trim().slice(0, 300);
         const now = Date.now();
-        if (!peer || !text || now - lastChat < 400) return;
+        const inDuo = Boolean(duos.groupOf(client));
+        if ((!peer && !inDuo) || !text || now - lastChat < 400) return;
         lastChat = now;
-        peer.send({ t: 'chat', text });
+        if (inDuo) duos.broadcast(client, { t: 'chat', text });
+        else peer.send({ t: 'chat', text });
         break;
       }
       case 'game': {
@@ -535,6 +699,22 @@ wss.on('connection', (ws, req) => {
       case 'invoice':
         onInvoice(msg);
         break;
+      case 'compliment':
+        onCompliment(msg);
+        break;
+      case 'react':
+        onReact(msg);
+        break;
+      case 'guess':
+        onGuess(msg);
+        break;
+      case 'wrapped':
+        send({ t: 'wrapped', data: db.wrapped(client.id) });
+        break;
+      case 'duo_create': case 'duo_join': case 'duo_search': case 'duo_next':
+      case 'duo_stop': case 'duo_leave': case 'duo_signal':
+        onDuo(msg);
+        break;
     }
   });
 
@@ -542,6 +722,8 @@ wss.on('connection', (ws, req) => {
     clearTimeout(authTimer);
     if (!client) return;
     requeue(mm.leave(client));
+    clearTimeout(client.guess?.timer);
+    duos.leave(client);
     if (clients.get(client.id) === client) clients.delete(client.id);
   });
 });
@@ -591,6 +773,20 @@ setInterval(() => {
     bot.remindEvent(db.eventAudience(now).filter(u => !clients.has(u.id)));
   }
 }, 1_000).unref();
+
+// Aura Wrapped: в воскресенье в 19:00 по времени аудитории — недельные итоги в бот (один раз за неделю)
+const wrappedFile = path.join(DATA_DIR, 'wrapped.week');
+setInterval(() => {
+  if (!bot) return;
+  const local = new Date(Date.now() + cfg.tzOffset * HOUR);
+  if (local.getUTCDay() !== 0 || local.getUTCHours() < 19) return;
+  const key = localDay(Date.now(), cfg.tzOffset);
+  let last = '';
+  try { last = fs.readFileSync(wrappedFile, 'utf8'); } catch {}
+  if (last === key) return;
+  try { fs.writeFileSync(wrappedFile, key); } catch {}
+  bot.sendWrapped(db.weeklyAudience().filter(u => !clients.has(u.id))).catch(e => console.error('wrapped:', e.message));
+}, 60_000).unref();
 
 // Адрес быстрого туннеля Cloudflare меняется при каждом перезапуске — узнаём его у cloudflared
 // (метрики --metrics …:2000, путь /quicktunnel) и обновляем кнопку меню бота.

@@ -9,7 +9,9 @@ import { shareLang } from './langs.js';
 const wants = (a, b) => a.want === 'any' || a.want === b.gender;
 
 export class Matchmaker {
-  constructor({ rematchAfterMs = 10_000, tierRelaxMs = 15_000, onPair = () => {}, onUnpair = () => {} } = {}) {
+  constructor({ rematchAfterMs = 10_000, tierRelaxMs = 15_000, onPair = () => {}, onUnpair = () => {}, peerInfo = null } = {}) {
+    // peerInfo(self, other, common) → что клиент self узнаёт о собеседнике (сервер прячет страну на время игры «Угадай»)
+    this.peerInfo = peerInfo;
     this.rematchAfterMs = rematchAfterMs;
     this.tierRelaxMs = tierRelaxMs;
     this.onPair = onPair;
@@ -60,8 +62,11 @@ export class Matchmaker {
     this.lastPeer.set(other.id, initiator.id);
     const common = (initiator.langs || ['ru']).filter(l => (other.langs || ['ru']).includes(l));
     const reveal = Boolean(initiator.reveal && other.reveal);
-    initiator.send({ t: 'matched', initiator: true, reveal, peer: { gender: other.gender, langs: common, country: other.country || null } });
-    other.send({ t: 'matched', initiator: false, reveal, peer: { gender: initiator.gender, langs: common, country: initiator.country || null } });
+    const describe = (self, o) => this.peerInfo
+      ? this.peerInfo(self, o, common)
+      : { gender: o.gender, langs: common, country: o.country || null };
+    initiator.send({ t: 'matched', initiator: true, reveal, peer: describe(initiator, other) });
+    other.send({ t: 'matched', initiator: false, reveal, peer: describe(other, initiator) });
     this.onPair(initiator, other, now, waits);
   }
 

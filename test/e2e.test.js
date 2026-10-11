@@ -41,6 +41,11 @@ async function startServer(t, extraEnv) {
   return port;
 }
 
+// Последнее сообщение типа t, удовлетворяющее условию (пропускает промежуточные)
+async function until(c, t, pred) {
+  for (;;) { const m = await c.next(t); if (pred(m)) return m; }
+}
+
 async function client(port, devId, extra = {}, headers = {}) {
   const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`, { headers });
   const queue = [], waiters = [];
@@ -166,6 +171,7 @@ test('вайб: контакты раскрываются только при в
   assert.equal((await b.next('game')).data.pick, 'rock');
 
   await sleep(900);
+  await sleep(800); // антиспам «Далее»
   a.send({ t: 'next' });
   await a.next('rate_prompt'); await b.next('rate_prompt');
   b.send({ t: 'rate', v: 1 });
@@ -241,10 +247,18 @@ test('паспорт: страна из заголовка Cloudflare, штам�
   assert.equal(br.ready.me.country, 'BR');
   br.send({ t: 'find' }); de.send({ t: 'find' });
   const m = await br.next('matched');
-  assert.equal(m.peer.country, 'DE');
+  // «Угадай, откуда он»: страна скрыта, 4 варианта, штамп приходит вместе с ответом
+  assert.equal(m.peer.country, null);
   assert.equal(m.reveal, false);
-  const st = await br.next('stamp');
-  assert.deepEqual([st.country, st.total], ['DE', 1]);
+  assert.equal(m.peer.guess.options.length, 4);
+  assert.ok(m.peer.guess.options.includes('DE'));
+  br.send({ t: 'guess', country: 'DE' });
+  const g = await br.next('guess_result');
+  assert.deepEqual([g.ok, g.country, g.stamp.country, g.stamp.total], [true, 'DE', 'DE', 1]);
+  await until(br, 'me', m => m.me.aura === 110);
+  const wrong = (await de.next('matched')).peer.guess.options.find(c => c !== 'BR');
+  de.send({ t: 'guess', country: wrong });
+  assert.equal((await de.next('guess_result')).ok, false);
 
   // Оба в режиме «Сначала голос» → reveal: true
   const v1 = await client(port, 'dev-voice-1'), v2 = await client(port, 'dev-voice-2');
@@ -253,4 +267,70 @@ test('паспорт: страна из заголовка Cloudflare, штам�
   v1.send({ t: 'find' }); v2.send({ t: 'find' });
   assert.equal((await v1.next('matched')).reveal, true);
   for (const c of [br, de, v1, v2]) c.ws.close();
+});
+
+test('комплимент после разговора, реакции и салюты, итоги недели', async t => {
+  const port = await startServer(t, { RATE_MIN_SECONDS: '0' });
+  const a = await client(port, 'dev-cmp-a'), b = await client(port, 'dev-cmp-b');
+  a.send({ t: 'find' }); b.send({ t: 'find' });
+  await a.next('matched'); await b.next('matched');
+
+  a.send({ t: 'react', kind: 'fire' });
+  assert.equal((await b.next('react')).kind, 'fire');
+  await sleep(320);
+  a.send({ t: 'react', kind: 'salute' });
+  await a.next('need_salutes');
+  await sleep(320);
+  a.send({ t: 'invoice', plan: 'salute5' }); // dev: без оплаты
+  await a.next('invoice');
+  await until(a, 'me', m => m.me.salutes === 5);
+  a.send({ t: 'react', kind: 'salute' });
+  assert.equal((await b.next('react')).kind, 'salute');
+  const bm = (await until(b, 'me', m => m.me.salutesReceived === 1)).me;
+  assert.equal(bm.aura, 105);
+
+  await sleep(800); // антиспам «Далее»
+  a.send({ t: 'next' });
+  await a.next('rate_prompt');
+  a.send({ t: 'compliment', kind: 'smile' });
+  await a.next('complimented');
+  assert.equal((await b.next('compliment')).kind, 'smile');
+  b.send({ t: 'wrapped' });
+  const w = (await b.next('wrapped')).data;
+  assert.equal(w.chats, 1);
+  assert.deepEqual(w.compliments, { smile: 1 });
+  assert.equal(w.archetype, 'sunny');
+  a.ws.close(); b.ws.close();
+});
+
+test('Duo: приглашение по коду, поиск пары, сигналы по слотам, чат на четверых', async t => {
+  const port = await startServer(t);
+  const [a1, a2, b1, b2] = await Promise.all(['dev-duo-a1', 'dev-duo-a2', 'dev-duo-b1', 'dev-duo-b2'].map(id => client(port, id)));
+  a1.send({ t: 'duo_create' });
+  const code = (await a1.next('duo')).duo.code;
+  a2.send({ t: 'duo_join', code });
+  assert.equal((await a2.next('duo')).duo.size, 2);
+  a1.send({ t: 'duo_search' });
+  await a1.next('duo_waiting');
+
+  // Вторая пара входит по ссылке duo_<код>
+  const b1c = await client(port, 'dev-duo-b1x');
+  b1c.send({ t: 'duo_create' });
+  const code2 = (await b1c.next('duo')).duo.code;
+  const b2c = await client(port, 'dev-duo-b2x', { startParam: `duo_${code2}` });
+  assert.equal((await b2c.next('duo')).duo.size, 2);
+  b2c.send({ t: 'duo_search' });
+  const ms = await Promise.all([a1, a2, b1c, b2c].map(c => c.next('duo_matched')));
+  assert.deepEqual(ms.map(m => m.you).sort(), [0, 1, 2, 3]);
+  assert.equal(ms[0].peers.length, 3);
+
+  a1.send({ t: 'duo_signal', to: ms[3].you, data: { sdp: 'x' } });
+  const sig = await b2c.next('duo_signal');
+  assert.deepEqual([sig.from, sig.data.sdp], [ms[0].you, 'x']);
+  a2.send({ t: 'chat', text: 'привет' });
+  assert.equal((await b1c.next('chat')).text, 'привет');
+
+  a1.send({ t: 'duo_leave' });
+  for (const c of [a2, b1c, b2c]) assert.equal((await c.next('duo_ended')).reason, 'partner_left');
+  for (const c of [a1, a2, b1, b2, b1c, b2c]) c.ws.close();
 });

@@ -3,7 +3,7 @@ import crypto from 'node:crypto';
 import { botProfile, pickLang, note } from './bot-profile.js';
 
 // Бот на long polling: /start, комнаты каналов, Aura Hour, оплата Telegram Stars, поддержка, админ-команды.
-export function createBot({ token, site, stateFile, appName, adminIds, supportContact, plans, db, appLink, schedule, stats, kick, onPremium }) {
+export function createBot({ token, site, stateFile, appName, adminIds, supportContact, plans, db, appLink, schedule, stats, kick, onPremium, onSalutes = () => {} }) {
   const api = async (method, body) => {
     const res = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
       method: 'POST',
@@ -47,9 +47,12 @@ export function createBot({ token, site, stateFile, appName, adminIds, supportCo
   function createInvoiceLink(userId, planId) {
     const plan = plans[planId];
     if (!plan) throw new Error('unknown plan');
+    const salute = plan.kind === 'salute';
     return api('createInvoiceLink', {
-      title: `${appName} Premium · ${plan.title}`,
-      description: 'Безлимитный фильтр «кого ищу» и приоритет в очереди. Без автопродления.',
+      title: salute ? `${appName} · 🎆 ${plan.title}` : `${appName} Premium · ${plan.title}`,
+      description: salute
+        ? 'Салюты — яркая реакция на весь экран собеседника. Он получает +aura, а каждые 10 салютов — сутки Premium.'
+        : 'Безлимитный фильтр «кого ищу» и приоритет в очереди. Без автопродления.',
       payload: JSON.stringify({ u: userId, p: planId }),
       currency: 'XTR',
       prices: [{ label: plan.title, amount: plan.stars }],
@@ -72,6 +75,15 @@ export function createBot({ token, site, stateFile, appName, adminIds, supportCo
     const sp = msg.successful_payment;
     const { u, p } = JSON.parse(sp.invoice_payload);
     const plan = plans[p];
+    if (plan.kind === 'salute') {
+      if (db.recordPayment({ chargeId: sp.telegram_payment_charge_id, userId: u, plan: p, stars: sp.total_amount })) {
+        db.addSalutes(u, plan.count);
+        db.event('salute_buy', u, sp.total_amount, p);
+      }
+      onSalutes(u);
+      const lang = db.langOf(u);
+      return reply(msg.chat.id, note(lang, 'salutes_bought', { n: plan.count }), appButton(note(lang, 'open')));
+    }
     const until = db.addPayment({
       chargeId: sp.telegram_payment_charge_id, userId: u, plan: p, stars: sp.total_amount, days: plan.days,
     });
@@ -92,7 +104,7 @@ export function createBot({ token, site, stateFile, appName, adminIds, supportCo
 
     switch (cmd.split('@')[0]) {
       case '/start': {
-        const param = arg.startsWith('room_') || arg.startsWith('ref_') ? arg : '';
+        const param = /^(room_|ref_|duo_)[\w-]{1,40}$|^wrapped$/.test(arg) ? arg : '';
         const p = profile[pickLang(msg.from?.language_code)];
         return reply(chatId, p.description, param ? linkButton(p.button, appLink(param)) : appButton(p.button));
       }
@@ -152,6 +164,7 @@ export function createBot({ token, site, stateFile, appName, adminIds, supportCo
         if (!p) return reply(chatId, '/refund &lt;telegram_payment_charge_id&gt; — платёж не найден');
         await api('refundStarPayment', { user_id: Number(p.user_id), telegram_payment_charge_id: arg });
         db.markRefunded(arg, plans[p.plan]?.days || 0);
+        if (plans[p.plan]?.kind === 'salute') db.addSalutes(p.user_id, -Math.min(plans[p.plan].count, db.user(p.user_id).salutes));
         onPremium(p.user_id, db.user(p.user_id).premium_until);
         return reply(chatId, `Возвращено ${p.stars}⭐ пользователю ${p.user_id}`);
       }
@@ -224,8 +237,23 @@ export function createBot({ token, site, stateFile, appName, adminIds, supportCo
     }
   }
 
+  // Недельные итоги (Aura Wrapped): короткая сводка + кнопка, открывающая карточку в приложении
+  async function sendWrapped(users) {
+    console.log(`Aura Wrapped: ${users.length} пользователям`);
+    let sent = 0;
+    for (const { id, lang } of users) {
+      const w = db.wrapped(id);
+      if (!w.chats) continue;
+      const text = note(lang, 'wrapped', { app: appName, chats: w.chats, min: w.minutes, countries: w.countries.length });
+      await notify(id, text, linkButton(note(lang, 'wrapped_btn'), appLink('wrapped')));
+      sent++;
+      await new Promise(r => setTimeout(r, 40));
+    }
+    return sent;
+  }
+
   return {
-    start, createInvoiceLink, notify, remindEvent, setMenu,
+    start, createInvoiceLink, notify, remindEvent, sendWrapped, setMenu,
     get username() { return self.username; },
   };
 }

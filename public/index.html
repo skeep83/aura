@@ -21,7 +21,7 @@
       document.documentElement.dataset.theme = dark ? 'dark' : 'light';
     })();
   </script>
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="style.css?v=20261011">
 </head>
 <body>
   <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -127,6 +127,8 @@
     <div class="stage" id="stage">
       <video id="self-bg" autoplay playsinline muted aria-hidden="true"></video>
       <video id="remote" autoplay playsinline></video>
+      <!-- Duo 2×2: сетка из четырёх видео -->
+      <div class="duo-grid" id="duo-grid" hidden></div>
       <div class="swipe-hint lg" id="swipe-hint"><svg><use href="#i-next"/></svg></div>
 
       <!-- Режим «Сначала голос»: аура дышит в такт голосу собеседника, лицо проявляется постепенно -->
@@ -148,11 +150,16 @@
         <div class="search-title" id="search-title">Ищем собеседника</div>
         <div class="search-sub" id="search-sub" data-i="swipe_hint">Свайп влево — следующий</div>
         <button class="btn-pill lg" id="resume" hidden data-i="resume">Продолжить поиск</button>
+        <button class="btn-pill lg duo-pill" id="duo-open"><i>👫</i><span data-i="duo">Duo 2×2</span></button>
         <div class="rate lg" id="rate" hidden>
           <span data-i="rate_q">Как прошлый собеседник?</span>
           <div class="rate-btns">
             <button data-v="-1" aria-label="Плохо">👎</button>
             <button data-v="1" class="plus">✨ +aura</button>
+          </div>
+          <div class="compl" id="compl">
+            <small data-i="compl_q">Оставить комплимент</small>
+            <div class="compl-chips" id="compl-chips"></div>
           </div>
         </div>
       </div>
@@ -162,6 +169,25 @@
       </div>
 
       <div class="messages" id="messages"></div>
+
+      <!-- «Угадай, откуда он»: первые секунды разговора -->
+      <div class="guess lg" id="guess" hidden>
+        <div class="guess-head"><b data-i="guess_title">Откуда собеседник?</b><span class="guess-timer" id="guess-timer"></span></div>
+        <div class="guess-opts" id="guess-opts"></div>
+        <small id="guess-sub"></small>
+      </div>
+
+      <!-- Aura Moment: запрос согласия, обратный отсчёт и вспышка -->
+      <div class="moment-ask lg" id="moment-ask" hidden>
+        <b data-i="moment_ask">📸 Собеседник предлагает общее фото</b>
+        <small data-i="moment_ask_sub">Сохранится только у вас, если согласны оба</small>
+        <div class="moment-btns"><button class="btn-pill" id="moment-no" data-i="not_now">Не сейчас</button><button class="btn-pill solid" id="moment-yes" data-i="moment_yes">Давай!</button></div>
+      </div>
+      <div class="countdown" id="countdown" hidden></div>
+      <div class="flash" id="flash"></div>
+
+      <!-- Летящие реакции -->
+      <div class="fx" id="fx" aria-hidden="true"></div>
     </div>
 
     <header class="topbar">
@@ -179,17 +205,24 @@
     <div class="banners">
       <div class="banner lg" id="event-banner" hidden></div>
       <div class="banner lg" id="room-chip" hidden></div>
+      <div class="banner lg" id="duo-chip" hidden></div>
     </div>
 
     <div class="rail" id="rail">
       <button class="rail-btn lg vibe" id="vibe-btn" aria-label="Вайб"><svg><use href="#i-spark"/></svg><span data-i="vibe">Вайб</span></button>
       <button class="rail-btn lg" id="games-btn" aria-label="Игры"><i>🎲</i><span data-i="games">Игры</span></button>
       <button class="rail-btn lg" id="mask-btn" aria-label="Маска"><i>🎭</i><span data-i="mask">Маска</span></button>
+      <button class="rail-btn lg" id="react-btn" aria-label="Реакции"><i>💫</i><span data-i="reactions">Реакции</span></button>
+      <button class="rail-btn lg" id="moment-btn" aria-label="Момент"><i>📸</i><span data-i="moment">Момент</span></button>
     </div>
 
     <div class="game-layer" id="game-layer" hidden></div>
 
     <footer class="bottom" id="bottom">
+      <div class="react-bar lg" id="react-bar" hidden>
+        <button data-k="heart">❤️</button><button data-k="laugh">😂</button><button data-k="fire">🔥</button><button data-k="clap">👏</button>
+        <button data-k="salute" class="salute">🎆<b id="salute-n">0</b></button>
+      </div>
       <form class="composer lg" id="composer" hidden>
         <input id="chat-input" maxlength="300" autocomplete="off" placeholder="Сообщение…" data-iph="message_ph" enterkeyhint="send">
         <button type="submit" class="send" aria-label="Отправить"><svg><use href="#i-send"/></svg></button>
@@ -310,7 +343,61 @@
     <p class="sheet-sub" id="passport-sub"></p>
     <div class="stamps" id="stamps"></div>
     <p class="fine" id="aura-line"></p>
+    <div class="compl-board" id="compl-board">
+      <div class="label" data-i="compl_title">Что о вас говорят</div>
+      <div class="compl-list" id="compl-list"></div>
+    </div>
     <button class="btn-grad" id="passport-share"><span data-i="passport_share">Поделиться</span></button>
+    <button class="list-btn wrapped-btn" id="wrapped-open"><i>🔮</i><span data-i="wrapped_btn">Моя неделя</span></button>
+  </section>
+
+  <section class="lg sheet center" id="sheet-wrapped" hidden>
+    <div class="grip"></div>
+    <p class="eyebrow-s" data-i="wrapped_title">Ваша неделя в Aura</p>
+    <div class="arch" id="arch-emoji">✨</div>
+    <h2 id="arch-title"></h2>
+    <p class="sheet-sub" id="arch-desc"></p>
+    <div class="wstats" id="wstats"></div>
+    <p class="fine" id="wrapped-top"></p>
+    <button class="btn-grad" id="wrapped-share"><span data-i="share_story">Поделиться в Stories</span></button>
+  </section>
+
+  <section class="lg sheet center" id="sheet-salutes" hidden>
+    <div class="grip"></div>
+    <div class="badge salute-badge">🎆</div>
+    <h2 data-i="salute_title">Салюты</h2>
+    <p class="sheet-sub" data-i="salute_sub">Яркий салют на весь экран собеседника</p>
+    <p class="fine" id="salutes-left"></p>
+    <div class="plans" id="salute-plans"></div>
+    <button class="btn-grad" id="salute-buy"><span data-i="pay">Оплатить звёздами</span></button>
+  </section>
+
+  <section class="lg sheet center" id="sheet-moment" hidden>
+    <div class="grip"></div>
+    <h2 data-i="moment_title">Aura Moment</h2>
+    <img class="moment-img" id="moment-img" alt="">
+    <div class="moment-actions">
+      <button class="btn-grad" id="moment-share"><span data-i="share_story">Поделиться в Stories</span></button>
+      <button class="btn-pill lg" id="moment-save" data-i="moment_save">Сохранить</button>
+    </div>
+  </section>
+
+  <section class="lg sheet center" id="sheet-duo" hidden>
+    <div class="grip"></div>
+    <div class="badge duo-badge">👫</div>
+    <h2 data-i="duo_title">Duo — двое на двое</h2>
+    <p class="sheet-sub" id="duo-status" data-i="duo_sub">Объединитесь с другом и знакомьтесь с другой парой</p>
+    <div id="duo-none">
+      <button class="btn-grad" id="duo-create"><span data-i="duo_create">Создать Duo</span></button>
+      <form class="duo-join" id="duo-join"><input id="duo-code" maxlength="8" autocomplete="off" data-iph="duo_join_ph" placeholder="Код друга"><button class="btn-pill lg" data-i="duo_join">Войти</button></form>
+    </div>
+    <div id="duo-have" hidden>
+      <div class="duo-slots"><div class="duo-slot on">🙂<small data-i="you">вы</small></div><div class="duo-plus">+</div><div class="duo-slot" id="duo-friend">⏳<small data-i="duo_friend">друг</small></div></div>
+      <div class="duo-code" id="duo-code-view"></div>
+      <button class="btn-grad" id="duo-invite"><span data-i="duo_invite">Пригласить друга</span></button>
+      <button class="btn-grad" id="duo-search" hidden><span data-i="duo_search">Искать пару</span></button>
+      <button class="list-btn" id="duo-leave"><i>🚪</i><span data-i="duo_leave">Выйти из Duo</span></button>
+    </div>
   </section>
 
   <section class="lg sheet" id="sheet-games" hidden>
@@ -351,10 +438,11 @@
 
   <div class="toasts" id="toasts"></div>
 
-  <script src="i18n.js"></script>
-  <script src="face.js"></script>
-  <script src="mask.js"></script>
-  <script src="games.js"></script>
-  <script src="app.js"></script>
+  <script src="i18n.js?v=20261011"></script>
+  <script src="face.js?v=20261011"></script>
+  <script src="mask.js?v=20261011"></script>
+  <script src="games.js?v=20261011"></script>
+  <script src="duo.js?v=20261011"></script>
+  <script src="app.js?v=20261011"></script>
 </body>
 </html>
