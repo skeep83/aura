@@ -11,10 +11,19 @@ flock -n 9 || exit 0
 COMPOSE=(docker compose -f docker-compose.vps.yml)
 log() { echo "$(date '+%F %T') $*"; }
 
-git fetch -q origin main
-OLD=$(git rev-parse HEAD)
-NEW=$(git rev-parse origin/main)
-if [[ "$OLD" == "$NEW" && "${1:-}" != "--force" ]]; then exit 0; fi
+if [[ "${1:-}" == "--continue" ]]; then
+  # Второй проход: уже на новой версии, сам скрипт тоже новый
+  OLD=$AURA_FROM; NEW=$(git rev-parse HEAD)
+else
+  git fetch -q origin main
+  OLD=$(git rev-parse HEAD)
+  NEW=$(git rev-parse origin/main)
+  if [[ "$OLD" == "$NEW" && "${1:-}" != "--force" ]]; then exit 0; fi
+  git -c advice.detachedHead=false checkout -q "$NEW"
+  # Перезапуск уже обновлённым update.sh — иначе изменения самого скрипта применились бы только в следующий раз
+  exec 9>&-
+  AURA_FROM=$OLD exec bash deploy/vps/update.sh --continue
+fi
 
 # Статика с версией ресурсов (?v=…), чтобы телефоны не смешивали новый index.html со старым app.js
 # Контейнер web смонтирован на .build целиком, поэтому замена .build/html переименованием видна ему сразу.
@@ -44,7 +53,6 @@ healthy() {
 }
 
 log "обновление ${OLD:0:7} → ${NEW:0:7}"
-git -c advice.detachedHead=false checkout -q "$NEW"
 deploy
 if healthy; then
   log "ok ${NEW:0:7}: $(git log -1 --format=%s)"
