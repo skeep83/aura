@@ -1,0 +1,9 @@
+[Unit]
+Description=Aura: обновление из GitHub
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/aura
+ExecStart=/opt/aura/deploy/vps/update.sh

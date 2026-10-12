@@ -10,3 +10,5 @@ data/
 *.state.json
 *.log
 .claude/
+secrets/
+.build/

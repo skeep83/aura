@@ -1,0 +1,10 @@
+[Unit]
+Description=Aura: проверять main в GitHub каждые 2 минуты
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=2min
+RandomizedDelaySec=15s
+
+[Install]
+WantedBy=timers.target

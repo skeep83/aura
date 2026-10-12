@@ -1,0 +1,77 @@
+# Продакшен на VPS (Contabo): всё на одном сервере, вход через именованный туннель Cloudflare.
+# Туннель даёт HTTPS, защиту от DDoS и заголовок CF-IPCountry (паспорт, «Угадай, откуда он»),
+# поэтому портов 80/443 наружу не нужно — открыт только TURN.
+# Запуск и обновления — deploy/vps/update.sh (systemd-таймер тянет main из GitHub).
+# Секреты: .env (бот, TURN, модерация) и secrets/tunnel/creds.json — права 600, не в git.
+services:
+  web:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    volumes:
+      - ./.build/public:/usr/share/nginx/html:ro
+      - ./deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - api
+
+  api:
+    build: .
+    image: aura-api:latest
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATA_DIR: /data
+      SERVE_STATIC: "0"
+      MODERATION_URL: http://moderation:8000
+    volumes:
+      - ./data:/data
+    depends_on:
+      - moderation
+
+  moderation:
+    build: ./moderation
+    image: aura-moderation:latest
+    restart: unless-stopped
+    environment:
+      MODERATION_TOKEN: ${MODERATION_TOKEN}
+      TORCH_THREADS: "3"
+    cpus: 4
+    mem_limit: 3g
+
+  # TURN для пар за NAT/CGNAT: UDP 3478 + диапазон ретрансляции, поэтому сеть хоста
+  coturn:
+    image: coturn/coturn:4.6
+    restart: unless-stopped
+    network_mode: host
+    command:
+      - -n
+      - --listening-port=3478
+      - --fingerprint
+      - --use-auth-secret
+      - --static-auth-secret=${TURN_SECRET}
+      - --realm=${TURN_HOST}
+      - --external-ip=${PUBLIC_IP}
+      - --min-port=49160
+      - --max-port=49999
+      - --total-quota=400
+      - --stale-nonce=600
+      - --no-cli
+      - --no-multicast-peers
+      - --no-tlsv1
+      - --no-tlsv1_1
+      - --denied-peer-ip=0.0.0.0-0.255.255.255
+      - --denied-peer-ip=10.0.0.0-10.255.255.255
+      - --denied-peer-ip=100.64.0.0-100.127.255.255
+      - --denied-peer-ip=127.0.0.0-127.255.255.255
+      - --denied-peer-ip=169.254.0.0-169.254.255.255
+      - --denied-peer-ip=172.16.0.0-172.31.255.255
+      - --denied-peer-ip=192.168.0.0-192.168.255.255
+
+  # Именованный туннель «aura»: aura-life.online / www → web
+  tunnel:
+    image: cloudflare/cloudflared:2025.1.0
+    restart: unless-stopped
+    command: ["tunnel", "--no-autoupdate", "run", "--credentials-file", "/etc/cloudflared/creds.json", "--url", "http://web:80", "e1122556-a6a1-47de-8370-05c35d71433c"]
+    volumes:
+      - ./secrets/tunnel:/etc/cloudflared:ro
+    depends_on:
+      - web
