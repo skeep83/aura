@@ -35,6 +35,7 @@
         <a data-page="rooms"><i>📢</i>Комнаты</a>
         <a data-page="ads"><i>📣</i>Реклама</a>
         <a data-page="ai"><i>✨</i>ИИ</a>
+        <a data-page="jev"><i>⚖️</i>Jev</a>
         <a data-page="system"><i>⚙</i>Система</a>
       </nav>
       <div class="side-foot">
@@ -167,7 +168,11 @@
             <table class="kv" id="ai-usage"></table>
           </div>
         </div>
-              <form class="card ai-form" id="jev-form" autocomplete="off" style="margin-top:16px">
+
+      </section>
+
+      <section class="page" id="page-jev" hidden>
+        <form class="card ai-form" id="jev-form" autocomplete="off" style="max-width:760px">
           <div class="card-head"><h3>Jev · TypeSafe AI — модель решений</h3><label class="switch"><input type="checkbox" id="jev-enabled"><span></span><b id="jev-enabled-label">Выключен</b></label></div>
           <p class="muted small">Отвечает не текстом, а вероятностями на типизированные вопросы (да/нет, выбор, шкала). Дёшево и быстро — идеально для модерации и решений. Ключ: docs.typesafe.ai (ранний доступ) или совместимый шлюз.</p>
           <div class="grid2" style="margin-top:0">

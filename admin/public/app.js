@@ -69,7 +69,7 @@
   $('logout-btn').onclick = async () => { await fetch('/auth/logout', { method: 'POST' }); showLogin(); };
 
   // ---------- Навигация ----------
-  const TITLES = { overview: 'Обзор', users: 'Пользователи', reports: 'Жалобы', payments: 'Платежи', moderation: 'Модерация', rooms: 'Комнаты', ads: 'Реклама', ai: 'ИИ', system: 'Система' };
+  const TITLES = { overview: 'Обзор', users: 'Пользователи', reports: 'Жалобы', payments: 'Платежи', moderation: 'Модерация', rooms: 'Комнаты', ads: 'Реклама', ai: 'ИИ', jev: 'Jev · модель решений', system: 'Система' };
   const state = { page: 'overview', days: 30, series: null, overview: null, users: { q: '', filter: '', sort: 'recent', offset: 0, limit: 50 } };
   function go(page) {
     state.page = page;
@@ -84,7 +84,7 @@
 
   async function load() {
     try {
-      const loader = { overview: loadOverview, users: loadUsers, reports: loadReports, payments: loadPayments, moderation: loadModeration, rooms: loadRooms, ads: loadAds, ai: loadAI, system: loadSystem }[state.page];
+      const loader = { overview: loadOverview, users: loadUsers, reports: loadReports, payments: loadPayments, moderation: loadModeration, rooms: loadRooms, ads: loadAds, ai: loadAI, jev: loadJev, system: loadSystem }[state.page];
       await loader();
       $('updated').textContent = 'обновлено ' + new Date().toLocaleTimeString('ru-RU');
     } catch (e) { if (e.message !== 'login') toast('Ошибка: ' + e.message, true); }
@@ -453,7 +453,6 @@
   // ---------- ИИ ----------
   let aiCfg = null;
   async function loadAI() {
-    loadJev().catch(e => toast('Jev: ' + e.message, true));
     aiCfg = await api('ai');
     const c = aiCfg;
     $('ai-enabled').checked = c.enabled;
@@ -561,7 +560,7 @@
       const risk = r.risk;
       box.textContent = risk ? `Риск: ${levels[Math.round(risk.score)] || risk.score} (уверенность ${Math.round((risk.confidence ?? 0) * 100)}%)` +
         (r.bot !== null ? `\nПохож на бота/спамера: ${Math.round(r.bot * 100)}%` : '') : 'Нет ответа';
-    } catch (e) { box.textContent = e.message === 'jev_off' ? 'Jev выключен — включите его в разделе «ИИ».' : 'Не получилось: ' + e.message; }
+    } catch (e) { box.textContent = e.message === 'jev_off' ? 'Jev выключен — включите его в разделе «Jev».' : 'Не получилось: ' + e.message; }
     btn.disabled = false;
   }
 
