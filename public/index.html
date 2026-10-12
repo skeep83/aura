@@ -152,6 +152,7 @@
         <button class="btn-pill lg" id="resume" hidden data-i="resume">Продолжить поиск</button>
         <button class="btn-pill lg duo-pill" id="duo-open"><i>👫</i><span data-i="duo">Duo 2×2</span></button>
         <button class="btn-pill lg crowd-pill" id="crowd-btn" hidden><i>🔔</i><span id="crowd-text"></span></button>
+        <button class="btn-pill lg" id="live-leave" hidden data-i="live_leave">Выйти из очереди</button>
         <div class="rate lg" id="rate" hidden>
           <span data-i="rate_q">Как прошлый собеседник?</span>
           <div class="rate-btns">
@@ -187,6 +188,24 @@
       <div class="countdown" id="countdown" hidden></div>
       <div class="flash" id="flash"></div>
 
+      <!-- Звонок другу: входящий / исходящий -->
+      <div class="call-card lg" id="call-card" hidden>
+        <div class="call-ava" id="call-ava">🙂</div>
+        <b id="call-title"></b>
+        <small id="call-sub"></small>
+        <div class="call-btns">
+          <button class="call-btn decline" id="call-decline" aria-label="Отклонить">✕</button>
+          <button class="call-btn accept" id="call-accept" aria-label="Ответить">📞</button>
+        </div>
+      </div>
+
+      <!-- Эфир стримера: QR для зрителей поверх видео -->
+      <div class="live-qr" id="live-qr" hidden>
+        <canvas id="live-qr-canvas" width="300" height="300"></canvas>
+        <b data-i="live_qr">Сканируй — поговори со мной</b>
+        <small id="live-qr-link"></small>
+      </div>
+
       <!-- Летящие реакции -->
       <div class="fx" id="fx" aria-hidden="true"></div>
     </div>
@@ -197,6 +216,7 @@
         <button class="pill lg me-pill" id="me-pill">✨<b id="aura-val">100</b><span id="streak-val" hidden></span><span id="passport-val">🛂0</span></button>
       </div>
       <div class="top-actions lg">
+        <button class="icon-btn friends-btn" id="friends-btn" aria-label="Друзья"><i>👥</i><span class="dot-badge" id="friends-dot" hidden></span></button>
         <button class="icon-btn" id="filter-btn" aria-label="Настройки"><svg><use href="#i-filter"/></svg></button>
         <button class="icon-btn gold" id="premium-btn" aria-label="Premium"><svg><use href="#i-crown"/></svg></button>
         <button class="icon-btn danger" id="report-btn" aria-label="Пожаловаться"><svg><use href="#i-flag"/></svg></button>
@@ -207,6 +227,7 @@
       <div class="banner lg" id="event-banner" hidden></div>
       <div class="banner lg" id="room-chip" hidden></div>
       <div class="banner lg" id="duo-chip" hidden></div>
+      <div class="banner lg live-chip" id="live-chip" hidden></div>
     </div>
 
     <div class="rail" id="rail">
@@ -315,6 +336,7 @@
       </div>
     </div>
     <div class="extras">
+      <button class="list-btn" id="live-open"><i>🎙</i><span data-i="live_btn">Комната стримера</span></button>
       <button class="list-btn" id="invite-btn2"><i>🎁</i><span data-i="invite_short">Пригласить друга — Premium обоим</span></button>
       <button class="list-btn" id="status-btn" hidden><i>✨</i><span data-i="status_btn">Поставить статус «в Aura»</span></button>
       <button class="list-btn" id="home-btn" hidden><i>📲</i><span data-i="home_btn">Добавить на главный экран</span></button>
@@ -381,6 +403,41 @@
       <button class="btn-grad" id="moment-share"><span data-i="share_story">Поделиться в Stories</span></button>
       <button class="btn-pill lg" id="moment-save" data-i="moment_save">Сохранить</button>
     </div>
+  </section>
+
+  <section class="lg sheet" id="sheet-friends" hidden>
+    <div class="grip"></div>
+    <h2 data-i="friends_title">Друзья</h2>
+    <p class="sheet-sub" data-i="friends_sub">Те, с кем был взаимный вайб. Звоните прямо в Aura</p>
+    <div class="friends-list" id="friends-list"></div>
+  </section>
+
+  <section class="lg sheet center" id="sheet-live" hidden>
+    <div class="grip"></div>
+    <div class="badge live-badge">🎙</div>
+    <h2 data-i="live_title">Комната стримера</h2>
+    <p class="sheet-sub" data-i="live_sub">Зрители встают в очередь по вашей ссылке и по одному говорят с вами в эфире</p>
+    <div id="live-setup" class="live-form">
+      <label class="field-l"><span data-i="live_name">Название эфира</span><input id="live-name" maxlength="40" autocomplete="off"></label>
+      <div class="label" data-i="live_turn">Время на зрителя</div>
+      <div class="seg" id="live-round"><button data-v="60">1 мин</button><button data-v="120" class="on">2 мин</button><button data-v="180">3 мин</button><button data-v="300">5 мин</button></div>
+      <button class="btn-grad" id="live-start"><span data-i="live_start">Начать эфир</span></button>
+    </div>
+    <div id="live-on" class="live-form" hidden>
+      <div class="live-stat"><b id="live-queue">0</b><small data-i="live_in_queue">в очереди</small></div>
+      <div class="copy-link" id="live-link"></div>
+      <button class="btn-grad" id="live-copy"><span data-i="live_copy">Скопировать ссылку для зрителей</span></button>
+      <button class="list-btn" id="live-stop"><i>⏹</i><span data-i="live_stop">Завершить эфир</span></button>
+    </div>
+  </section>
+
+  <section class="lg sheet center" id="sheet-live-info" hidden>
+    <div class="grip"></div>
+    <div class="badge live-badge" id="live-info-icon">🔴</div>
+    <h2 id="live-info-title"></h2>
+    <p class="sheet-sub" id="live-info-sub"></p>
+    <button class="btn-grad" id="live-info-main"><span id="live-info-main-text"></span></button>
+    <button class="list-btn" id="live-info-roulette"><i>🎲</i><span data-i="live_to_roulette">В общую рулетку</span></button>
   </section>
 
   <section class="lg sheet center" id="sheet-cam" hidden>

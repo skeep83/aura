@@ -499,3 +499,62 @@ test('Aura Hour по местному времени: событие идёт у
   assert.equal(me.me.crowdMin, 8);
   for (const c of [utc, msk, unknown]) c.ws.close();
 });
+
+test('Друзья: взаимный вайб → друзья, звонок онлайн-другу, после звонка — не в общую очередь', async t => {
+  const port = await startServer(t);
+  const a = await client(port, 'dev-fr-a'), b = await client(port, 'dev-fr-b');
+  a.send({ t: 'find' }); b.send({ t: 'find' });
+  await a.next('matched'); await b.next('matched');
+  a.send({ t: 'vibe' }); b.send({ t: 'vibe' });
+  await a.next('friend_added'); await b.next('friend_added');
+  await sleep(850);
+  a.send({ t: 'stop' }); await a.next('stopped');
+  a.send({ t: 'friends' });
+  const list = (await a.next('friends')).list;
+  assert.equal(list.length, 1);
+  assert.equal(list[0].online, true);
+  a.send({ t: 'call', code: list[0].code });
+  assert.equal((await a.next('calling')).to.online, true);
+  const inc = await b.next('call_incoming');
+  assert.ok(inc.from.code);
+  b.send({ t: 'call_accept' });
+  const ma = await until(a, 'matched', m => m.peer.direct === 'friend');
+  assert.equal(ma.peer.country, null); // без игры «Угадай» (страны у dev-клиентов нет)
+  await until(b, 'matched', m => m.peer.direct === 'friend');
+  await sleep(850);
+  a.send({ t: 'next' });
+  await b.next('call_ended'); // b не уходит в общую рулетку
+  // Не друг — позвонить нельзя
+  const c = await client(port, 'dev-fr-c');
+  c.send({ t: 'call', code: list[0].code });
+  assert.equal((await c.next('call_error')).code, 'not_friend');
+  for (const x of [a, b, c]) x.ws.close();
+});
+
+test('Комната стримера: очередь зрителей, ход по одному, «Далее» у стримера — следующий', async t => {
+  const port = await startServer(t);
+  const h = await client(port, 'dev-live-h');
+  h.send({ t: 'live_start', title: 'Test Stream', roundSec: 60 });
+  const on = await until(h, 'live', m => m.state === 'on');
+  assert.equal(on.title, 'Test Stream');
+  assert.ok(on.link.includes(`live_${on.code}`));
+  const v1 = await client(port, 'dev-live-v1'), v2 = await client(port, 'dev-live-v2');
+  v1.send({ t: 'live_join', code: on.code });
+  const m1 = await until(v1, 'matched', m => m.peer.direct === 'live');
+  assert.equal(m1.peer.name, 'Dev'); // зритель видит имя стримера
+  const mh = await until(h, 'matched', m => m.peer.direct === 'live');
+  assert.equal(mh.peer.name, ''); // а имя зрителя в трансляцию не попадает
+  v2.send({ t: 'live_join', code: on.code });
+  assert.equal((await until(v2, 'live', m => m.state === 'queue')).position, 1);
+  await sleep(850);
+  h.send({ t: 'next' });
+  assert.equal((await until(v1, 'live', m => m.state === 'done')).title, 'Test Stream');
+  await until(v2, 'matched', m => m.peer.direct === 'live');
+  // Неизвестный эфир — «не в эфире», можно подписаться
+  const v3 = await client(port, 'dev-live-v3');
+  v3.send({ t: 'live_join', code: 'nosuch1' });
+  assert.equal((await v3.next('live')).state, 'offline');
+  h.send({ t: 'live_stop' });
+  await until(h, 'live', m => m.state === 'stopped');
+  for (const x of [h, v1, v2, v3]) x.ws.close();
+});

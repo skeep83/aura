@@ -106,6 +106,18 @@ export class Db {
         at INTEGER NOT NULL
       );
       CREATE INDEX IF NOT EXISTS compliments_target ON compliments (target, at);
+      CREATE TABLE IF NOT EXISTS live_subs (
+        code TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        at INTEGER NOT NULL,
+        PRIMARY KEY (code, user_id)
+      );
+      CREATE TABLE IF NOT EXISTS friends (
+        a TEXT NOT NULL,
+        b TEXT NOT NULL,
+        at INTEGER NOT NULL,
+        PRIMARY KEY (a, b)
+      );
     `);
     const have = new Set(this.db.prepare('PRAGMA table_info(users)').all().map(c => c.name));
     for (const [col, def] of Object.entries(USER_COLUMNS)) {
@@ -356,6 +368,34 @@ export class Db {
     if (!ref) return null;
     const byCode = this.db.prepare('SELECT id FROM users WHERE ref_code = ?').get(ref);
     return byCode ? byCode.id : this.exists(ref) ? ref : null;
+  }
+
+  // ---------- Друзья: появляются после взаимного вайба, хранятся в обе стороны ----------
+  addFriends(a, b, now = Date.now()) {
+    if (a === b) return false;
+    const ins = this.db.prepare('INSERT OR IGNORE INTO friends (a, b, at) VALUES (?, ?, ?)');
+    const added = ins.run(a, b, now).changes > 0;
+    ins.run(b, a, now);
+    return added;
+  }
+  removeFriend(a, b) {
+    this.db.prepare('DELETE FROM friends WHERE (a = ? AND b = ?) OR (a = ? AND b = ?)').run(a, b, b, a);
+  }
+  isFriend(a, b) { return Boolean(this.db.prepare('SELECT 1 FROM friends WHERE a = ? AND b = ?').get(a, b)); }
+  friendsOf(id) {
+    return this.db.prepare(`SELECT u.id, u.name, u.username, u.country, u.last_seen AS lastSeen, f.at
+      FROM friends f JOIN users u ON u.id = f.b WHERE f.a = ? ORDER BY u.last_seen DESC LIMIT 200`).all(id);
+  }
+
+  // ---------- Подписки «сообщить, когда стример выйдет в эфир» ----------
+  liveSub(code, id, on, now = Date.now()) {
+    if (on) this.db.prepare('INSERT OR IGNORE INTO live_subs (code, user_id, at) VALUES (?, ?, ?)').run(code, id, now);
+    else this.db.prepare('DELETE FROM live_subs WHERE code = ? AND user_id = ?').run(code, id);
+  }
+  isLiveSub(code, id) { return Boolean(this.db.prepare('SELECT 1 FROM live_subs WHERE code = ? AND user_id = ?').get(code, id)); }
+  liveSubscribers(code) {
+    return this.db.prepare(`SELECT s.user_id AS id FROM live_subs s JOIN users u ON u.id = s.user_id
+      WHERE s.code = ? AND u.allows_pm = 1 AND u.banned_until <= ?`).all(code, Date.now()).map(r => r.id);
   }
 
   // ---------- Рефералы: оба получают бонус, только для нового пользователя ----------

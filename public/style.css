@@ -583,3 +583,48 @@ a { color: var(--accent); text-decoration: none; font-weight: 600; }
 .crowd-pill { display: inline-flex; align-items: center; gap: 8px; color: #fff; margin-top: 10px; font-size: 13px; }
 .crowd-pill i { font-style: normal; }
 .crowd-pill.on { background: rgba(62,214,139,.35); }
+
+/* Друзья и звонки */
+.friends-btn i { font-style: normal; font-size: 18px; }
+.friends-btn { position: relative; }
+.dot-badge { position: absolute; top: 6px; right: 6px; width: 9px; height: 9px; border-radius: 50%; background: #3ed68b; box-shadow: 0 0 0 2px rgba(0,0,0,.25); }
+.friends-list { display: flex; flex-direction: column; gap: 8px; max-height: 55vh; overflow-y: auto; }
+.friend { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 18px; background: var(--card); box-shadow: var(--shadow-sm); }
+.friend .ava { width: 42px; height: 42px; flex: none; border-radius: 14px; display: grid; place-items: center; font-weight: 800; color: #fff; background: var(--grad); position: relative; }
+.friend .ava.on::after { content: ''; position: absolute; right: -2px; bottom: -2px; width: 12px; height: 12px; border-radius: 50%; background: #3ed68b; border: 2px solid var(--card); }
+.friend .meta { flex: 1; min-width: 0; }
+.friend .meta b { display: block; color: var(--title); font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.friend .meta small { color: var(--muted); font-size: 12px; }
+.friend .call { width: 44px; height: 44px; border-radius: 50%; background: var(--grad); color: #fff; font-size: 18px; box-shadow: var(--glow); flex: none; }
+.friend .call:disabled { opacity: .35; box-shadow: none; }
+.friend .rm { width: 30px; height: 30px; border-radius: 50%; color: var(--muted); font-size: 13px; flex: none; }
+.friends-empty { padding: 26px 10px; text-align: center; color: var(--muted); font-size: 14px; }
+.call-card { position: absolute; z-index: 14; left: 50%; top: 50%; translate: -50% -50%; width: min(86vw, 330px); padding: 26px 20px 22px; border-radius: 32px;
+  display: flex; flex-direction: column; align-items: center; gap: 6px; color: #fff; text-align: center; animation: rise .4s var(--spring); }
+.call-ava { width: 86px; height: 86px; border-radius: 28px; display: grid; place-items: center; font-size: 40px; font-weight: 800; background: var(--grad);
+  box-shadow: var(--glow); margin-bottom: 8px; animation: ring 1.4s ease-in-out infinite; }
+@keyframes ring { 50% { box-shadow: 0 0 0 14px rgba(74,134,247,.18), var(--glow); } }
+.call-card b { font-size: 18px; }
+.call-card small { opacity: .8; font-size: 13px; }
+.call-btns { display: flex; gap: 28px; margin-top: 16px; }
+.call-btn { width: 64px; height: 64px; border-radius: 50%; font-size: 26px; color: #fff; transition: transform .25s var(--spring); }
+.call-btn:active { transform: scale(.9); }
+.call-btn.decline { background: #ef5b6e; box-shadow: 0 10px 24px -8px rgba(239,91,110,.8); }
+.call-btn.accept { background: #34c77b; box-shadow: 0 10px 24px -8px rgba(52,199,123,.8); }
+.call-btn[hidden] { display: none; }
+
+/* Комната стримера */
+.live-badge { background: linear-gradient(135deg, #ff6b6b, #c026d3); box-shadow: 0 14px 28px -10px rgba(192,38,211,.6); }
+.live-form { display: flex; flex-direction: column; gap: 10px; width: 100%; }
+.live-form[hidden] { display: none; }
+.field-l { display: flex; flex-direction: column; gap: 6px; text-align: left; font-size: 12px; font-weight: 700; color: var(--muted); }
+.field-l input { height: 46px; padding: 0 14px; border-radius: 14px; border: 1px solid var(--line); background: var(--fill); color: var(--title); font: inherit; font-weight: 600; outline: none; }
+.live-stat b { display: block; font-size: 40px; font-weight: 800; color: var(--title); }
+.live-stat small { color: var(--muted); font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; }
+.copy-link { padding: 10px 14px; border-radius: 14px; background: var(--fill); font-size: 13px; font-weight: 600; color: var(--title); word-break: break-all; }
+.live-chip { background: linear-gradient(135deg, rgba(255,80,100,.88), rgba(192,38,211,.85)); }
+.live-qr { position: absolute; z-index: 7; left: 12px; bottom: calc(100px + var(--safe-bottom)); width: 170px; padding: 12px; border-radius: 22px; background: #fff;
+  color: #1b2440; display: flex; flex-direction: column; align-items: center; gap: 4px; text-align: center; box-shadow: 0 20px 40px rgba(10,20,60,.35); }
+.live-qr canvas { width: 146px; height: 146px; }
+.live-qr b { font-size: 12px; line-height: 1.2; }
+.live-qr small { font-size: 10px; color: #5a6080; word-break: break-all; }

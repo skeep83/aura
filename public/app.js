@@ -94,6 +94,7 @@
   let freePerDay = 10;
   let maskOn = store.get('maskDefault') === '1';
   let invoiceKind = 'premium';
+  let afterStart = null; // что сделать после включения камеры (принять звонок, встать в очередь эфира)
   let aiFeatures = {};
   let wrappedShown = false;
 
@@ -270,8 +271,9 @@
         const who = peer?.gender === 'f' ? t('peer_f') : peer?.gender === 'm' ? t('peer_m') : '';
         const lang = (peer?.langs || []).map(l => LANG_META[l]?.[0]).filter(Boolean).join(' ');
         const where = peer?.country ? `${flagOf(peer.country)} ${countryName(peer.country)}` : '';
-        if (who || lang || where) {
-          el.peerChip.textContent = [where, who, lang].filter(Boolean).join(' · ');
+        const direct = peer?.direct === 'friend' ? `👥 ${peer.name || ''}` : peer?.direct === 'live' ? `🔴 ${peer.name || 'LIVE'}` : '';
+        if (direct || who || lang || where) {
+          el.peerChip.textContent = [direct, where, direct ? '' : who, lang].filter(Boolean).join(' · ');
           el.peerChip.hidden = false;
           setTimeout(() => { el.peerChip.hidden = true; }, 4000);
         }
@@ -418,6 +420,12 @@
         if (msg.referred) toast(t('referred'), 4000);
         setupExtras();
         if (msg.openWrapped && !wrappedShown) { wrappedShown = true; setTimeout(openWrapped, 600); }
+        if (msg.liveInvite && !pendingLive) {
+          pendingLive = msg.liveInvite.code;
+          if (localStream) joinLive(pendingLive); else afterStart = () => joinLive(pendingLive);
+          if (!localStream) toast(t(msg.liveInvite.online ? 'live_invite_on' : 'live_invite_off', { title: msg.liveInvite.title }), 5000);
+        }
+        send({ t: 'friends' });
         if (state === 'waiting' || state === 'connecting' || state === 'talking') send({ t: 'find' });
         break;
       case 'me': setMe(msg.me); break;
@@ -425,7 +433,11 @@
       case 'waiting':
         if (state !== 'idle') { closePeer(); state = 'waiting'; setOverlay('waiting'); }
         break;
-      case 'matched': startPeer(msg.initiator, msg.peer, msg.reveal); break;
+      case 'matched':
+        hideCallCard();
+        $('live-leave').hidden = true;
+        startPeer(msg.initiator, msg.peer, msg.reveal);
+        break;
       case 'stamp':
         me.passport = [...new Set([...(me.passport || []), msg.country])];
         renderPassportPill();
@@ -515,6 +527,11 @@
         break;
       case 'banned': onBanned(msg.until, msg.reason); break;
       case 'react': onReact(msg.kind); break;
+      case 'friend_added': case 'friends': case 'calling': case 'call_incoming': case 'call_declined':
+      case 'call_timeout': case 'call_cancelled': case 'call_error': case 'call_ended':
+        onCallMessage(msg);
+        break;
+      case 'live': onLiveMessage(msg); break;
       case 'need_salutes': openSalutes(); break;
       case 'guess_result': onGuessResult(msg); break;
       case 'complimented': toast(t(msg.dup ? 'compl_dup' : 'complimented'), 2200); break;
@@ -1468,6 +1485,180 @@
     }
   }
 
+  // ---------- Друзья в Aura: список и звонки ----------
+  let friends = [];
+  const agoText = ms => {
+    const m = Math.max(1, Math.round((Date.now() - ms) / 60000));
+    return m < 60 ? t('ago_m', { n: m }) : m < 1440 ? t('ago_h', { n: Math.round(m / 60) }) : t('ago_d', { n: Math.round(m / 1440) });
+  };
+  function renderFriends(list) {
+    friends = list || [];
+    $('friends-dot').hidden = !friends.some(f => f.online && !f.busy);
+    const wrap = $('friends-list');
+    if (!friends.length) { wrap.innerHTML = `<div class="friends-empty">${t('friends_empty')}</div>`; return; }
+    wrap.replaceChildren(...friends.map(f => {
+      const row = document.createElement('div');
+      row.className = 'friend';
+      const status = f.online ? (f.busy ? t('fr_busy') : t('fr_online')) : t('fr_seen', { ago: agoText(f.lastSeen) });
+      row.innerHTML = `<span class="ava${f.online ? ' on' : ''}"></span><span class="meta"><b></b><small></small></span>
+        <button class="call" aria-label="call">📞</button><button class="rm" aria-label="remove">✕</button>`;
+      row.querySelector('.ava').textContent = (f.name || '?').slice(0, 1).toUpperCase();
+      row.querySelector('b').textContent = `${f.name || '—'} ${f.country ? flagOf(f.country) : ''}`;
+      row.querySelector('small').textContent = status;
+      const call = row.querySelector('.call');
+      call.disabled = f.busy;
+      call.onclick = () => { closeSheet(); send({ t: 'call', code: f.code }); haptic('medium'); };
+      row.querySelector('.rm').onclick = () => {
+        const ok = () => send({ t: 'friend_remove', code: f.code });
+        const q = t('fr_remove_q', { name: f.name || '' });
+        if (tg?.showConfirm) tg.showConfirm(q, yes => yes && ok()); else if (confirm(q)) ok();
+      };
+      return row;
+    }));
+  }
+  $('friends-btn').onclick = () => { send({ t: 'friends' }); renderFriends(friends); openSheet('sheet-friends'); haptic(); };
+  setInterval(() => { if (state !== 'banned' && ws?.readyState === WebSocket.OPEN) send({ t: 'friends' }); }, 120_000);
+
+  let callKind = null, ringTimer = null;
+  function showCallCard(kind, p) {
+    callKind = kind;
+    $('call-ava').textContent = (p.name || '?').slice(0, 1).toUpperCase();
+    $('call-title').textContent = kind === 'in' ? t('call_in', { name: p.name || '' }) : t('call_out', { name: p.name || '' });
+    $('call-sub').textContent = kind === 'in' ? (p.country ? `${flagOf(p.country)} ${countryName(p.country)}` : '') : t(p.online ? 'call_ringing' : 'call_waiting_tg');
+    $('call-accept').hidden = kind !== 'in';
+    $('call-card').hidden = false;
+    clearInterval(ringTimer);
+    if (kind === 'in') ringTimer = setInterval(() => haptic('medium'), 1500);
+    haptic(kind === 'in' ? 'heavy' : 'light');
+  }
+  function hideCallCard() { $('call-card').hidden = true; callKind = null; clearInterval(ringTimer); }
+  $('call-accept').onclick = () => {
+    hideCallCard();
+    if (!localStream) { afterStart = () => send({ t: 'call_accept' }); toast(t('call_need_start'), 5000); return; }
+    send({ t: 'call_accept' });
+  };
+  $('call-decline').onclick = () => { send({ t: callKind === 'in' ? 'call_decline' : 'call_cancel' }); hideCallCard(); haptic(); };
+  function onCallMessage(msg) {
+    switch (msg.t) {
+      case 'friend_added': toast(t('friend_added', { name: msg.name || '' }), 3500); send({ t: 'friends' }); break;
+      case 'friends': renderFriends(msg.list); break;
+      case 'calling': closePeer(); state = 'idle'; setOverlay('idle'); showCallCard('out', msg.to); break;
+      case 'call_incoming': showCallCard('in', msg.from); break;
+      case 'call_declined': hideCallCard(); toast(t('call_declined')); break;
+      case 'call_timeout': hideCallCard(); toast(t('call_timeout')); break;
+      case 'call_cancelled': hideCallCard(); if (msg.reason !== 'gone' || callKind) toast(t('call_cancelled')); break;
+      case 'call_error': hideCallCard(); toast(t(msg.code === 'busy' ? 'call_busy' : 'call_not_friend')); break;
+      case 'call_ended':
+        closePeer(); state = 'idle'; setOverlay('idle');
+        if (!liveState) toast(t('call_ended'), 2200);
+        break;
+    }
+  }
+
+  // ---------- Комната стримера ----------
+  let liveState = null, liveViewer = null, pendingLive = null, liveTick = null;
+  const mmss2 = ms => { const s = Math.max(0, Math.ceil(ms / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
+  function renderLiveChip() {
+    const chip = $('live-chip');
+    if (!liveState) { chip.hidden = true; $('live-qr').hidden = true; clearInterval(liveTick); return; }
+    chip.hidden = false;
+    const left = liveState.turnEndsAt ? ` · ⏱ ${mmss2(liveState.turnEndsAt - Date.now())}` : '';
+    chip.replaceChildren(`🔴 LIVE · ${t('live_chip', { n: liveState.queue })}${left}`);
+    const qr = document.createElement('button');
+    qr.textContent = 'QR';
+    qr.onclick = () => { $('live-qr').hidden = !$('live-qr').hidden; haptic(); };
+    const stop = document.createElement('button');
+    stop.textContent = '⏹';
+    stop.onclick = () => { send({ t: 'live_stop' }); haptic(); };
+    chip.append(qr, stop);
+  }
+  function drawLiveQr(link) {
+    const c = $('live-qr-canvas'), x = c.getContext('2d');
+    x.fillStyle = '#fff'; x.fillRect(0, 0, 300, 300);
+    drawQr(x, link, 10, 10, 280);
+    $('live-qr-link').textContent = link.replace(/^https?:\/\//, '');
+  }
+  function renderLiveSheet() {
+    $('live-setup').hidden = Boolean(liveState);
+    $('live-on').hidden = !liveState;
+    if (liveState) { $('live-queue').textContent = liveState.queue; $('live-link').textContent = liveState.link; }
+    else if (!$('live-name').value) $('live-name').value = tg?.initDataUnsafe?.user?.first_name || '';
+    for (const b of $('live-round').children) b.textContent = t('live_min', { n: Number(b.dataset.v) / 60 });
+  }
+  $('live-open').onclick = () => { closeSheet(); renderLiveSheet(); openSheet('sheet-live'); };
+  $('live-round').onclick = e => { const b = e.target.closest('[data-v]'); if (!b) return; for (const x of $('live-round').children) x.classList.toggle('on', x === b); haptic(); };
+  $('live-start').onclick = () => {
+    const round = Number($('live-round').querySelector('.on')?.dataset.v || 120);
+    send({ t: 'live_start', title: $('live-name').value.trim(), roundSec: round });
+    closeSheet();
+    haptic('success');
+  };
+  $('live-copy').onclick = () => { navigator.clipboard?.writeText(liveState?.link || '').then(() => toast(t('link_copied'))); haptic(); };
+  $('live-stop').onclick = () => { send({ t: 'live_stop' }); closeSheet(); };
+  function joinLive(code) { pendingLive = code; send({ t: 'live_join', code }); }
+  $('live-leave').onclick = () => { send({ t: 'live_leave' }); $('live-leave').hidden = true; liveViewer = null; state = 'idle'; setOverlay('idle'); haptic(); };
+  function liveInfo({ icon, title, sub, main, onMain }) {
+    $('live-info-icon').textContent = icon;
+    $('live-info-title').textContent = title;
+    $('live-info-sub').textContent = sub;
+    $('live-info-main-text').textContent = main;
+    $('live-info-main').onclick = () => { closeSheet(); onMain(); };
+    openSheet('sheet-live-info');
+  }
+  $('live-info-roulette').onclick = () => { closeSheet(); pendingLive = null; next(); };
+  function onLiveMessage(msg) {
+    if (msg.role === 'host') {
+      if (msg.state === 'on') {
+        const first = !liveState;
+        liveState = msg;
+        renderLiveChip();
+        renderLiveSheet();
+        if (first) { drawLiveQr(msg.link); $('live-qr').hidden = false; toast(t('live_started'), 3500); clearInterval(liveTick); liveTick = setInterval(renderLiveChip, 1000); }
+        if (!pc && state !== 'talking') {
+          state = 'waiting'; setOverlay('waiting');
+          el.searchTitle.textContent = t('live_waiting');
+          el.searchSub.textContent = t('live_waiting_sub', { n: msg.queue });
+        }
+      } else if (msg.state === 'stopped') {
+        liveState = null; renderLiveChip(); renderLiveSheet();
+        closePeer(); state = 'idle'; setOverlay('idle');
+        toast(t('live_stopped'));
+      }
+      return;
+    }
+    switch (msg.state) {
+      case 'queue':
+        liveViewer = msg;
+        if (!pc) {
+          state = 'waiting'; setOverlay('waiting');
+          el.searchTitle.textContent = t('live_queue_title', { title: msg.title });
+          el.searchSub.textContent = t('live_queue_sub', { pos: msg.position, size: msg.size });
+          $('live-leave').hidden = false;
+        }
+        break;
+      case 'offline':
+        liveViewer = null; $('live-leave').hidden = true;
+        state = 'idle'; setOverlay('idle');
+        liveInfo({
+          icon: '🔴', title: t('live_off_title', { title: msg.title || '' }), sub: t('live_off_sub'),
+          main: t(msg.subscribed ? 'live_unsub_btn' : 'live_sub_btn'),
+          onMain: () => { if (!msg.subscribed) requestPm(); send({ t: 'live_sub', code: msg.code, on: !msg.subscribed }); if (!msg.subscribed) toast(t('live_subbed'), 3500); },
+        });
+        break;
+      case 'done':
+        liveViewer = null; $('live-leave').hidden = true;
+        liveInfo({ icon: '🎉', title: t('live_done_title', { title: msg.title }), sub: t('live_done_sub'), main: t('live_again'), onMain: () => joinLive(msg.code) });
+        break;
+      case 'ended':
+        liveViewer = null; $('live-leave').hidden = true;
+        toast(t('live_ended', { title: msg.title || '' }), 3500);
+        break;
+      case 'left':
+        liveViewer = null; $('live-leave').hidden = true;
+        break;
+    }
+  }
+
   // ---------- Действия ----------
   function next() {
     if (state === 'banned') return;
@@ -1482,8 +1673,10 @@
       return;
     }
     closePeer();
+    $('live-leave').hidden = true;
     state = 'waiting';
     setOverlay('waiting');
+    if (liveState) { el.searchTitle.textContent = t('live_waiting'); el.searchSub.textContent = t('live_waiting_sub', { n: liveState.queue }); }
     if (ws?.readyState === WebSocket.OPEN) send({ t: 'next' });
     else if (!ws || ws.readyState === WebSocket.CLOSED) connect(); // после ready поиск начнётся сам
     haptic();
@@ -1816,7 +2009,8 @@
     el.local.play().catch(() => {}); // srcObject назначен, пока экран был скрыт — автоплей не стартует сам
     el.selfBg.play().catch(() => {});
     haptic('medium');
-    next();
+    if (afterStart) { const f = afterStart; afterStart = null; state = 'idle'; setOverlay('idle'); f(); }
+    else next();
   };
 
   connect();

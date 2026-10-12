@@ -14,6 +14,7 @@ import { EventSchedule, localDay } from './events.js';
 import { StoryStore } from './stories.js';
 import { note } from './bot-profile.js';
 import { DuoManager } from './duo.js';
+import { LiveManager } from './live.js';
 import { createAdmin } from './admin.js';
 import { ChatFilter } from './chatfilter.js';
 import { createAI } from './ai.js';
@@ -151,6 +152,11 @@ const mm = new Matchmaker({
   peerInfo(self, o, common) {
     clearTimeout(self.guess?.timer);
     self.guess = null;
+    // Звонок другу или стримеру: собеседник известен, игра «Угадай» не нужна
+    if (self.direct) {
+      const hideName = self.direct === 'live' && self.live?.role === 'host'; // имя зрителя не попадает в трансляцию
+      return { gender: o.gender, langs: common, country: o.country || null, direct: self.direct, name: hideName ? '' : o.name || '' };
+    }
     if (self.country && o.country && self.country !== o.country) {
       self.guess = { answer: o.country, options: guessOptions(o.country, self.country), done: false, stamp: null };
       return { gender: o.gender, langs: common, country: null, guess: { options: self.guess.options, seconds: GUESS_MS / 1000 } };
@@ -192,6 +198,12 @@ const mm = new Matchmaker({
   },
   onUnpair(a, b, durationMs) {
     a.vibe = b.vibe = null;
+    if (a.direct || b.direct) {
+      const kind = a.direct || b.direct;
+      for (const c of [a, b]) { c.direct = null; c.directEnded = true; }
+      db.event(`${kind}_end`, a.id, durationMs);
+      live.onUnpair(a, b);
+    }
     for (const c of [a, b]) { clearTimeout(c.guess?.timer); c.guess = null; }
     db.event('call_end', a.id, durationMs);
     db.event('talk', a.id, durationMs);
@@ -212,7 +224,7 @@ let bot_ = null;
 const bot = cfg.botToken ? (bot_ = createBot({
   token: cfg.botToken, site: { get url() { return cfg.publicUrl; } }, stateFile: path.join(DATA_DIR, 'bot-profile.hash'), appName: cfg.appName, adminIds: cfg.adminIds,
   supportContact: cfg.supportContact, plans, db, appLink, schedule,
-  stats: () => ({ online: clients.size, ...mm.stats(), ...duos.stats(), ...db.stats(), ...db.funnel() }),
+  stats: () => ({ online: clients.size, ...mm.stats(), ...duos.stats(), ...live.stats(), ...db.stats(), ...db.funnel() }),
   kick: id => kick(id),
   onSalutes: id => {
     const c = clients.get(id);
@@ -376,7 +388,97 @@ async function triageReport(targetId, reason) {
 }
 
 // Бывший собеседник автоматически ищет дальше
-function requeue(c) { if (c) mm.enqueue(c); }
+// После прямого звонка (друг, стример) человек не уходит в общую рулетку — ему приходит «звонок завершён».
+// Стример в эфире ждёт следующего зрителя из очереди.
+function requeue(c) {
+  if (!c) return;
+  if (c.live?.role === 'host') return;
+  if (c.live?.role === 'viewer') return;
+  if (c.directEnded) { c.directEnded = false; c.send({ t: 'call_ended' }); return; }
+  mm.enqueue(c);
+}
+
+// ---------- Комнаты стримеров ----------
+const live = new LiveManager({
+  mm,
+  requeue: c => requeue(c),
+  linkFor: code => appLink(`live_${code}`),
+  onLive: room => {
+    db.event('live_start', room.host.id, room.roundMs / 1000);
+    const subs = db.liveSubscribers(room.code).filter(id => !clients.has(id));
+    if (!bot || !subs.length) return;
+    (async () => {
+      for (const id of subs) {
+        const lang = db.langOf(id);
+        await bot.notify(id, note(lang, 'live_on', { title: escapeHtml(room.title), app: cfg.appName }),
+          { reply_markup: { inline_keyboard: [[{ text: note(lang, 'live_join'), url: appLink(`live_${room.code}`) }]] } });
+        await new Promise(r => setTimeout(r, 40));
+      }
+    })().catch(e => console.error('live notify:', e.message));
+  },
+});
+
+function liveInviteInfo(code) {
+  const room = live.room(code);
+  const hostId = db.resolveRef(code);
+  return { code, online: Boolean(room), title: room?.title || (hostId ? db.user(hostId).name : '') || 'Aura Live', subscribed: false };
+}
+
+// ---------- Звонки друзьям ----------
+const CALL_RING_MS = 30_000;       // онлайн-друг: сколько звонит входящий
+const CALL_OFFLINE_MS = 120_000;   // друг не в сети: сколько ждём, пока он откроет ссылку из бота
+const cardOf = c => ({ code: db.refCode(c.id), name: c.name || '', country: c.country || null });
+function cancelCall(c, reason = 'cancelled') {
+  const call = c?.call;
+  if (!call) return;
+  clearTimeout(call.timer);
+  c.call = null;
+  const other = clients.get(call.with);
+  if (other?.call?.with === c.id) {
+    clearTimeout(other.call.timer);
+    other.call = null;
+    other.send({ t: 'call_cancelled', reason });
+  }
+}
+function startCall(caller, code) {
+  const id = db.resolveRef(code);
+  if (!id || !db.isFriend(caller.id, id)) return caller.send({ t: 'call_error', code: 'not_friend' });
+  const target = clients.get(id);
+  if (target && (target.call || target.direct || target.live)) return caller.send({ t: 'call_error', code: 'busy' });
+  cancelCall(caller);
+  requeue(mm.leave(caller));
+  const name = target ? target.name : db.user(id).name;
+  caller.call = { with: id, role: 'caller', timer: setTimeout(() => { cancelCall(caller, 'timeout'); caller.send({ t: 'call_timeout' }); }, target ? CALL_RING_MS : CALL_OFFLINE_MS) };
+  db.event('friend_call', caller.id, target ? 1 : 0);
+  if (target) {
+    target.call = { with: caller.id, role: 'callee', timer: null };
+    target.send({ t: 'call_incoming', from: cardOf(caller) });
+  } else {
+    const lang = db.langOf(id);
+    bot?.notify(id, note(lang, 'call_invite', { who: escapeHtml(caller.name || '?'), app: cfg.appName }),
+      { reply_markup: { inline_keyboard: [[{ text: note(lang, 'call_answer'), url: appLink(`call_${db.refCode(caller.id)}`) }]] } });
+  }
+  caller.send({ t: 'calling', to: { name: name || '', online: Boolean(target) } });
+}
+function acceptCall(callee, callerId = callee.call?.with) {
+  const caller = clients.get(callerId);
+  if (!caller || caller.call?.with !== callee.id) { callee.call = null; return callee.send({ t: 'call_cancelled', reason: 'gone' }); }
+  clearTimeout(caller.call.timer);
+  caller.call = callee.call = null;
+  caller.direct = callee.direct = 'friend';
+  for (const c of [caller, callee]) c.directEnded = false;
+  if (callee.duo) duos.leave(callee);
+  live.drop(callee);
+  mm.forcePair(caller, callee).forEach(requeue);
+  db.event('friend_call_ok', caller.id);
+}
+function friendsList(c) {
+  return db.friendsOf(c.id).map(f => {
+    const o = clients.get(f.id);
+    return { code: db.refCode(f.id), name: f.name || '', country: f.country || null, online: Boolean(o),
+      busy: Boolean(o && (mm.peerOf(o) || o.call || o.live)), lastSeen: f.lastSeen };
+  });
+}
 
 // ---------- HTTP ----------
 const MIME = {
@@ -568,6 +670,12 @@ wss.on('connection', (ws, req) => {
     clients.set(user.id, client);
     if (client.country) db.setCountry(client.id, client.country);
     if (sp.startsWith('duo_')) setTimeout(() => clients.get(client.id) === client && onDuo({ t: 'duo_join', code: sp.slice(4) }), 0);
+    // Друг открыл приглашение на звонок из бота — соединяем, если звонящий ещё ждёт
+    if (sp.startsWith('call_')) {
+      const callerId = db.resolveRef(sp.slice(5));
+      const caller = callerId && clients.get(callerId);
+      if (caller?.call?.with === user.id) client.callFrom = callerId;
+    }
     const source = sourceOf(sp, room);
     if (isNew) db.setSource(client.id, source);
     db.event('session', client.id, 0, source === 'direct' ? '' : source);
@@ -581,7 +689,14 @@ wss.on('connection', (ws, req) => {
       payments: Boolean(bot) || cfg.devAnon, emojiStatusId: cfg.emojiStatusId || null,
       freeFilterPerDay: cfg.freeFilterPerDay, reactions: FREE_REACTIONS, compliments: COMPLIMENTS,
       openWrapped: sp === 'wrapped', ai: ai.clientFeatures(),
+      liveInvite: sp.startsWith('live_') ? liveInviteInfo(sp.slice(5)) : null,
+      callInvite: sp.startsWith('call_') ? { code: sp.slice(5) } : null,
     });
+    if (client.callFrom) {
+      const caller = clients.get(client.callFrom);
+      if (caller?.call?.with === client.id) { client.call = { with: caller.id, role: 'callee', timer: null }; send({ t: 'call_incoming', from: cardOf(caller) }); }
+      client.callFrom = null;
+    }
   }
 
   async function onFrame(msg) {
@@ -650,6 +765,11 @@ wss.on('connection', (ws, req) => {
     if (peer.vibe !== client.id) return send({ t: 'vibe_sent' });
     db.event('vibe_match', client.id);
     db.event('vibe_match', peer.id);
+    // Взаимный вайб = друзья в Aura: можно звонить напрямую
+    if (db.addFriends(client.id, peer.id)) {
+      send({ t: 'friend_added', name: peer.name || '' });
+      peer.send({ t: 'friend_added', name: client.name || '' });
+    }
     const card = c => ({ name: c.name || 'Собеседник', username: c.username || null, id: c.id });
     send({ t: 'vibe_match', peer: card(peer) });
     peer.send({ t: 'vibe_match', peer: card(client) });
@@ -810,6 +930,11 @@ wss.on('connection', (ws, req) => {
         const now = Date.now();
         if (now - lastNext < 800) return; // антиспам «Далее»
         lastNext = now;
+        // Стример: «Далее» — следующий зритель из очереди
+        if (client.live?.role === 'host') { mm.leave(client, { t: 'peer_left', reason: 'live_turn' }); break; }
+        live.leave(client);
+        client.directEnded = false;
+        cancelCall(client);
         requeue(mm.leave(client));
         if (client.duo) duos.leave(client);
         mm.enqueue(client);
@@ -899,6 +1024,57 @@ wss.on('connection', (ws, req) => {
       case 'guess':
         onGuess(msg);
         break;
+      case 'friends':
+        send({ t: 'friends', list: friendsList(client) });
+        break;
+      case 'friend_remove': {
+        const id = db.resolveRef(String(msg.code || ''));
+        if (id) db.removeFriend(client.id, id);
+        send({ t: 'friends', list: friendsList(client) });
+        break;
+      }
+      case 'call':
+        if (Date.now() - (client.lastCallAt || 0) < 3000) return;
+        client.lastCallAt = Date.now();
+        startCall(client, String(msg.code || ''));
+        break;
+      case 'call_accept':
+        if (client.call?.role === 'callee') acceptCall(client);
+        break;
+      case 'call_decline': {
+        const other = client.call && clients.get(client.call.with);
+        if (other?.call?.with === client.id) { clearTimeout(other.call.timer); other.call = null; other.send({ t: 'call_declined' }); }
+        client.call = null;
+        break;
+      }
+      case 'call_cancel':
+        cancelCall(client);
+        break;
+      case 'live_start':
+        if (client.duo) duos.leave(client);
+        cancelCall(client);
+        live.start(client, db.refCode(client.id), { title: msg.title, roundSec: msg.roundSec });
+        break;
+      case 'live_stop':
+        live.stop(client);
+        send({ t: 'stopped' });
+        break;
+      case 'live_join': {
+        const code = String(msg.code || '').slice(0, 20);
+        if (client.duo) duos.leave(client);
+        cancelCall(client);
+        if (live.join(client, code)) db.event('live_join', client.id, 0, code);
+        else send({ t: 'live', state: 'offline', code, title: liveInviteInfo(code).title, subscribed: db.isLiveSub(code, client.id) });
+        break;
+      }
+      case 'live_leave':
+        live.leave(client);
+        send({ t: 'live', state: 'left' });
+        break;
+      case 'live_sub':
+        db.liveSub(String(msg.code || '').slice(0, 20), client.id, Boolean(msg.on));
+        send({ t: 'live', state: 'offline', code: msg.code, title: liveInviteInfo(String(msg.code || '')).title, subscribed: Boolean(msg.on) });
+        break;
       case 'crowd':
         db.setCrowd(client.id, Boolean(msg.on));
         db.event(msg.on ? 'crowd_on' : 'crowd_off', client.id);
@@ -955,6 +1131,8 @@ wss.on('connection', (ws, req) => {
     if (!client) return;
     requeue(mm.leave(client));
     clearTimeout(client.guess?.timer);
+    cancelCall(client, 'gone');
+    live.drop(client);
     duos.leave(client);
     if (clients.get(client.id) === client) clients.delete(client.id);
   });
@@ -1018,7 +1196,7 @@ setInterval(() => {
   }
   const roundMs = schedule.roundMs;
   for (const [a, b] of mm.pairsOlderThan(roundMs, now)) {
-    if (!a.eventActive || !b.eventActive || a.live || b.live || a.call || b.call) continue;
+    if (!a.eventActive || !b.eventActive || a.direct || b.direct) continue;
     a.send({ t: 'round_end' });
     mm.leave(a, { t: 'round_end' }, now); // b получит round_end как уведомление о разрыве
     mm.enqueue(a, now);

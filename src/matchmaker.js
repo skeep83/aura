@@ -80,6 +80,15 @@ export class Matchmaker {
     this.onPair(initiator, other, now, waits);
   }
 
+  // Пара без очереди: звонок другу, комната стримера. Прежние разговоры обоих разрываются.
+  // Возвращает бывших собеседников (их нужно вернуть в очередь)
+  forcePair(a, b, now = Date.now()) {
+    const former = [a, b].map(c => this.leave(c, { t: 'peer_left' }, now)).filter(p => p && p !== a && p !== b);
+    for (const c of [a, b]) { this.waiting.push(c); this.queuedAt.set(c, now); }
+    this.pair(a, b, now);
+    return former;
+  }
+
   enqueue(client, now = Date.now()) {
     this.leave(client, undefined, now);
     this.waiting.push(client);
