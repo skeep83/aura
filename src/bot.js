@@ -160,13 +160,9 @@ export function createBot({ token, site, stateFile, appName, adminIds, supportCo
         db.unban(arg);
         return reply(chatId, `Разбанен ${arg}`);
       case '/refund': {
-        const p = arg && db.payment(arg);
-        if (!p) return reply(chatId, '/refund &lt;telegram_payment_charge_id&gt; — платёж не найден');
-        await api('refundStarPayment', { user_id: Number(p.user_id), telegram_payment_charge_id: arg });
-        db.markRefunded(arg, plans[p.plan]?.days || 0);
-        if (plans[p.plan]?.kind === 'salute') db.addSalutes(p.user_id, -Math.min(plans[p.plan].count, db.user(p.user_id).salutes));
-        onPremium(p.user_id, db.user(p.user_id).premium_until);
-        return reply(chatId, `Возвращено ${p.stars}⭐ пользователю ${p.user_id}`);
+        const r = arg ? await refund(arg) : { error: 'not_found' };
+        if (r.error) return reply(chatId, '/refund &lt;telegram_payment_charge_id&gt; — ' + (r.error === 'refunded' ? 'уже возвращён' : 'платёж не найден'));
+        return reply(chatId, `Возвращено ${r.stars}⭐ пользователю ${r.userId}`);
       }
     }
   }
@@ -237,6 +233,20 @@ export function createBot({ token, site, stateFile, appName, adminIds, supportCo
     }
   }
 
+  // Возврат Stars: из команды /refund и из админ-панели
+  async function refund(chargeId) {
+    const p = db.payment(chargeId);
+    if (!p) return { error: 'not_found' };
+    if (p.refunded) return { error: 'refunded' };
+    if (!p.charge_id.startsWith('dev-')) {
+      await api('refundStarPayment', { user_id: Number(p.user_id), telegram_payment_charge_id: chargeId });
+    }
+    db.markRefunded(chargeId, plans[p.plan]?.days || 0);
+    if (plans[p.plan]?.kind === 'salute') db.addSalutes(p.user_id, -Math.min(plans[p.plan].count, db.user(p.user_id).salutes));
+    onPremium(p.user_id, db.user(p.user_id).premium_until);
+    return { ok: true, userId: p.user_id, stars: p.stars };
+  }
+
   // Недельные итоги (Aura Wrapped): короткая сводка + кнопка, открывающая карточку в приложении
   async function sendWrapped(users) {
     console.log(`Aura Wrapped: ${users.length} пользователям`);
@@ -253,7 +263,7 @@ export function createBot({ token, site, stateFile, appName, adminIds, supportCo
   }
 
   return {
-    start, createInvoiceLink, notify, remindEvent, sendWrapped, setMenu,
+    start, createInvoiceLink, notify, remindEvent, sendWrapped, setMenu, refund,
     get username() { return self.username; },
   };
 }

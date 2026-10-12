@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Aura Admin</title>
+  <link rel="icon" href="icon.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- Вход -->
+  <main id="login" class="login" hidden>
+    <form class="card login-card" id="login-form">
+      <div class="logo">✦</div>
+      <h1>Aura Admin</h1>
+      <p class="muted" id="login-hint">Панель управления продакшеном</p>
+      <input type="password" id="password" placeholder="Пароль" autocomplete="current-password" required>
+      <button class="btn primary" type="submit">Войти</button>
+      <p class="error" id="login-error" hidden></p>
+    </form>
+  </main>
+
+  <!-- Панель -->
+  <div id="app" class="shell" hidden>
+    <aside class="side">
+      <div class="brand"><span class="logo sm">✦</span><b>Aura</b><small>admin</small></div>
+      <nav id="nav">
+        <a data-page="overview" class="on"><i>◎</i>Обзор</a>
+        <a data-page="users"><i>👤</i>Пользователи</a>
+        <a data-page="reports"><i>⚑</i>Жалобы<span class="badge" id="nav-reports" hidden></span></a>
+        <a data-page="payments"><i>⭐</i>Платежи</a>
+        <a data-page="moderation"><i>🛡</i>Модерация</a>
+        <a data-page="rooms"><i>📢</i>Комнаты</a>
+        <a data-page="system"><i>⚙</i>Система</a>
+      </nav>
+      <div class="side-foot">
+        <div class="live-pill"><span class="dot"></span><b id="side-online">—</b> онлайн</div>
+        <button class="btn ghost sm" id="theme-btn">◐ Тема</button>
+        <button class="btn ghost sm" id="logout-btn">Выйти</button>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="top">
+        <h2 id="page-title">Обзор</h2>
+        <div class="top-right">
+          <span class="muted" id="updated"></span>
+          <button class="btn ghost sm" id="refresh-btn">↻ Обновить</button>
+        </div>
+      </header>
+
+      <!-- Обзор -->
+      <section class="page" id="page-overview">
+        <div class="kpis" id="kpis"></div>
+        <div class="grid2">
+          <div class="card"><div class="card-head"><h3>Активные пользователи</h3><div class="seg" id="range-seg"><button data-d="14">14 д</button><button data-d="30" class="on">30 д</button><button data-d="90">90 д</button></div></div><div class="chart" id="chart-users"></div><div class="legend"><span class="c1">DAU</span><span class="c2">Новые</span></div></div>
+          <div class="card"><div class="card-head"><h3>Разговоры и минуты</h3></div><div class="chart" id="chart-talk"></div><div class="legend"><span class="c1">Разговоры</span><span class="c3">Минуты</span></div></div>
+          <div class="card"><div class="card-head"><h3>Доход, ⭐</h3></div><div class="chart" id="chart-stars"></div></div>
+          <div class="card"><div class="card-head"><h3>Качество</h3></div><div class="chart" id="chart-quality"></div><div class="legend"><span class="c4">Не соединилось, %</span><span class="c5">Жалобы</span></div></div>
+        </div>
+        <div class="grid3">
+          <div class="card"><h3>Воронка за сутки</h3><table class="kv" id="funnel"></table></div>
+          <div class="card"><h3>Вирусные фичи · 7 дней</h3><table class="kv" id="viral"></table></div>
+          <div class="card"><h3>Аудитория</h3><div id="audience"></div></div>
+        </div>
+      </section>
+
+      <!-- Пользователи -->
+      <section class="page" id="page-users" hidden>
+        <div class="toolbar">
+          <input id="user-q" placeholder="Поиск: ID, @username, имя" autocomplete="off">
+          <div class="seg" id="user-filter">
+            <button data-f="" class="on">Все</button><button data-f="new">Новые</button><button data-f="premium">Premium</button>
+            <button data-f="reported">С жалобами</button><button data-f="banned">Забаненные</button>
+          </div>
+          <select id="user-sort">
+            <option value="recent">Недавно заходили</option><option value="created">Новые</option>
+            <option value="aura">Аура ↓</option><option value="low">Аура ↑</option><option value="referrals">Рефералы</option>
+          </select>
+        </div>
+        <div class="card flush"><table class="table" id="users-table"></table></div>
+        <div class="pager"><button class="btn ghost sm" id="prev">←</button><span id="page-info" class="muted"></span><button class="btn ghost sm" id="next">→</button></div>
+      </section>
+
+      <section class="page" id="page-reports" hidden>
+        <div class="chips-row" id="report-reasons"></div>
+        <div class="card flush"><table class="table" id="reports-table"></table></div>
+      </section>
+
+      <section class="page" id="page-payments" hidden>
+        <div class="kpis" id="pay-kpis"></div>
+        <div class="card flush"><table class="table" id="payments-table"></table></div>
+      </section>
+
+      <section class="page" id="page-moderation" hidden>
+        <div class="grid2">
+          <div class="card flush"><div class="card-head pad"><h3>События</h3></div><table class="table" id="mod-events"></table></div>
+          <div class="card flush"><div class="card-head pad"><h3>Сейчас в бане</h3></div><table class="table" id="mod-banned"></table></div>
+        </div>
+      </section>
+
+      <section class="page" id="page-rooms" hidden>
+        <div class="card flush"><table class="table" id="rooms-table"></table></div>
+      </section>
+
+      <section class="page" id="page-system" hidden>
+        <div class="grid2">
+          <div class="card"><h3>Состояние</h3><table class="kv" id="sys-status"></table></div>
+          <div class="card"><h3>Настройки (только чтение)</h3><table class="kv" id="sys-config"></table><p class="muted small">Меняются в <code>/opt/aura/.env</code> на сервере и применяются при перезапуске.</p></div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Карточка пользователя -->
+  <div class="scrim" id="scrim" hidden></div>
+  <aside class="drawer" id="drawer" hidden>
+    <button class="close" id="drawer-close">✕</button>
+    <div id="drawer-body"></div>
+  </aside>
+
+  <div class="toasts" id="toasts"></div>
+  <script src="app.js"></script>
+</body>
+</html>

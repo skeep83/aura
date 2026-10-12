@@ -334,3 +334,43 @@ test('Duo: приглашение по коду, поиск пары, сигна
   for (const c of [a2, b1c, b2c]) assert.equal((await c.next('duo_ended')).reason, 'partner_left');
   for (const c of [a1, a2, b1, b2, b1c, b2c]) c.ws.close();
 });
+
+test('админ-API: без токена закрыт, с токеном — обзор, поиск, бан/разбан, Premium, графики', async t => {
+  const port = await startServer(t, { ADMIN_API_TOKEN: 'adm-secret-token-0123456789' });
+  const call = async (p, { method = 'GET', body, token = 'adm-secret-token-0123456789' } = {}) => {
+    const res = await fetch(`http://127.0.0.1:${port}/api/admin/${p}`, {
+      method, headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: body && JSON.stringify(body),
+    });
+    return { status: res.status, data: await res.json().catch(() => null) };
+  };
+  assert.equal((await call('overview', { token: 'wrong' })).status, 401);
+
+  const a = await client(port, 'dev-adm-a'), b = await client(port, 'dev-adm-b');
+  a.send({ t: 'find' }); b.send({ t: 'find' });
+  await a.next('matched');
+
+  const o = (await call('overview')).data;
+  assert.equal(o.live.online, 2);
+  assert.equal(o.live.talking, 2);
+  assert.ok(o.totals.users >= 2);
+
+  const list = (await call('users?q=dev-adm-a')).data;
+  assert.equal(list.users[0].id, 'dev-adm-a');
+  assert.equal(list.users[0].online, true);
+
+  assert.equal((await call('users/dev-adm-b/premium', { method: 'POST', body: { days: 3 } })).data.ok, true);
+  await until(b, 'me', m => m.me.premium === true);
+
+  assert.equal((await call('users/dev-adm-a/ban', { method: 'POST', body: { hours: 2, reason: 'test' } })).status, 200);
+  assert.ok((await a.next('banned')).until > Date.now());
+  const d = (await call('users/dev-adm-a')).data;
+  assert.equal(d.user.banReason, 'test');
+  assert.equal((await call('users/dev-adm-a/unban', { method: 'POST', body: {} })).data.ok, true);
+  assert.equal((await call('users/dev-adm-a')).data.user.bannedUntil, 0);
+
+  const s = (await call('series?days=7')).data;
+  assert.equal(s.length, 7);
+  assert.ok(s.at(-1).matches >= 1);
+  assert.equal((await call('users/nope/ban', { method: 'POST', body: {} })).status, 400);
+  b.ws.close();
+});

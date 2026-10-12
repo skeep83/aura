@@ -14,6 +14,7 @@ import { EventSchedule, localDay } from './events.js';
 import { StoryStore } from './stories.js';
 import { note } from './bot-profile.js';
 import { DuoManager } from './duo.js';
+import { createAdmin } from './admin.js';
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const PUBLIC_DIR = path.join(ROOT, 'public');
@@ -269,14 +270,39 @@ function eventInfo(now = Date.now()) {
   return { active: s.active, startsAt: s.startsAt, endsAt: s.endsAt, roundMs: s.roundMs, time: env.EVENT_TIME || '21:00' };
 }
 
-function kick(id) {
+function kick(id, banned = true) {
   const c = clients.get(id);
   if (!c) return;
-  mm.leave(c);
+  requeue(mm.leave(c));
   duos.leave(c);
-  c.send({ t: 'banned', until: db.bannedUntil(id) });
-  c.close('banned');
+  if (banned) c.send({ t: 'banned', until: db.bannedUntil(id) });
+  c.close(banned ? 'banned' : 'kicked');
 }
+
+// Админ-API для панели на TrueNAS (/api/admin/*, Bearer ADMIN_API_TOKEN)
+const admin = createAdmin({
+  db, token: env.ADMIN_API_TOKEN || '',
+  cfg: {
+    ...cfg, moderationUrl: env.MODERATION_URL || '', nsfwThreshold: Number(env.NSFW_THRESHOLD || 0.85),
+    minorThreshold: Number(env.MINOR_THRESHOLD || 0.8),
+  },
+  live: () => ({ online: clients.size, ...mm.stats(), ...duos.stats(), event: eventInfo() }),
+  isOnline: id => clients.has(id),
+  kick,
+  refresh: id => {
+    const c = clients.get(id);
+    if (!c) return;
+    const u = db.user(id);
+    c.premium = db.isPremium(u);
+    c.tier = auraOf(u).tier;
+    c.send({ t: 'me', me: profileOf(c) });
+  },
+  refund: async chargeId => {
+    if (!bot) return { error: 'bot_off' };
+    try { return await bot.refund(chargeId); } catch (e) { return { error: e.message }; }
+  },
+  notify: (id, text) => bot?.notify(id, text),
+});
 
 // Бывший собеседник автоматически ищет дальше
 function requeue(c) { if (c) mm.enqueue(c); }
@@ -329,6 +355,10 @@ const server = http.createServer((req, res) => {
     return json(res, 200, { ok: true, online: clients.size, ...mm.stats(), moderation: moderation.enabled, event: eventInfo().active });
   }
   if (url.pathname === '/api/story' && req.method === 'POST') return onStoryUpload(req, res);
+  if (url.pathname.startsWith('/api/admin/')) {
+    admin.handle(req, res, url).catch(e => { console.error('admin:', e.message); if (!res.headersSent) { res.writeHead(500); res.end(); } });
+    return;
+  }
   if (url.pathname.startsWith('/s/')) {
     const file = stories.file(url.pathname.slice(3));
     if (!file) { res.writeHead(404); return res.end(); }
