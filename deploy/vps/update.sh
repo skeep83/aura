@@ -40,7 +40,10 @@ deploy() {
   build_web
   "${COMPOSE[@]}" build -q api moderation
   "${COMPOSE[@]}" up -d --remove-orphans
-  docker exec "$("${COMPOSE[@]}" ps -q web)" nginx -s reload >/dev/null 2>&1 || true
+  # nginx.conf смонтирован файлом: после checkout у файла новый inode, контейнер его не видит — пересоздать web
+  if [[ "$OLD" != "$NEW" ]] && ! git diff --quiet "$OLD" "$NEW" -- deploy/nginx.conf; then
+    "${COMPOSE[@]}" up -d --force-recreate --no-deps web
+  fi
 }
 
 healthy() {
