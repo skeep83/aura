@@ -137,7 +137,7 @@ export function createBot({ token, site, stateFile, appName, adminIds, supportCo
         db.setNotify(from, true);
         return reply(chatId, 'Напоминания об Aura Hour включены 🔥');
       case '/invite': {
-        const link = appLink(`ref_${from}`);
+        const link = appLink(`ref_${db.refCode(from)}`);
         return reply(chatId, `Пригласите друга — вы оба получите Premium на сутки 🎁\n\n<code>${link}</code>`,
           linkButton('Поделиться', `https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent(`Залетай в ${appName} — видеочат со всем миром ✨`)}`));
       }
@@ -236,6 +236,20 @@ export function createBot({ token, site, stateFile, appName, adminIds, supportCo
     }
   }
 
+  // Карточка для отправки в чат из Mini App (WebApp.shareMessage): фото + кнопка «Открыть Aura»
+  async function prepareShare(userId, { photoUrl, caption, button, url }) {
+    const r = await api('savePreparedInlineMessage', {
+      user_id: Number(userId),
+      result: {
+        type: 'photo', id: crypto.randomBytes(8).toString('hex'),
+        photo_url: photoUrl, thumbnail_url: photoUrl, caption: String(caption || '').slice(0, 1000),
+        reply_markup: { inline_keyboard: [[{ text: button, url }]] },
+      },
+      allow_user_chats: true, allow_group_chats: true, allow_channel_chats: true, allow_bot_chats: false,
+    });
+    return r.id;
+  }
+
   // Возврат Stars: из команды /refund и из админ-панели
   async function refund(chargeId) {
     const p = db.payment(chargeId);
@@ -266,7 +280,7 @@ export function createBot({ token, site, stateFile, appName, adminIds, supportCo
   }
 
   return {
-    start, createInvoiceLink, notify, remindEvent, sendWrapped, setMenu, refund,
+    start, createInvoiceLink, notify, remindEvent, sendWrapped, setMenu, refund, prepareShare,
     get username() { return self.username; },
   };
 }

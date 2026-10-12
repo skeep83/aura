@@ -252,7 +252,7 @@ function profileOf(c) {
     strikes: u.strikes, aura: aura.points, streak: db.streakOf(c.id, today(), yesterday()),
     filterLeft: c.premium ? null : db.filterLeft(c.id, today(), cfg.freeFilterPerDay),
     notifyEvents: Boolean(u.notify_events), allowsPm: Boolean(u.allows_pm),
-    refLink: appLink(`ref_${c.id}`), referrals: u.referrals,
+    refLink: appLink(`ref_${db.refCode(c.id)}`), shareLink: `${cfg.publicUrl || ''}/r/${db.refCode(c.id)}`, referrals: u.referrals,
     reveal: Boolean(c.reveal), country: c.country || null, passport: db.passport(c.id),
     salutes: u.salutes, salutesReceived: u.salutes_received, compliments: db.complimentsOf(c.id),
   };
@@ -365,6 +365,37 @@ async function onStoryUpload(req, res) {
   }
 }
 
+// Отправка карточки в чат Telegram: сервер готовит inline-сообщение с кнопкой «Открыть Aura» (реферальная ссылка автора)
+const SHARE_TEXT = {
+  ru: ['✨ Залетай в Aura — видеочат со всем миром прямо в Telegram', '🎥 Открыть Aura'],
+  uk: ['✨ Залітай в Aura — відеочат з усім світом прямо в Telegram', '🎥 Відкрити Aura'],
+  es: ['✨ Únete a Aura — videochat con todo el mundo dentro de Telegram', '🎥 Abrir Aura'],
+  pt: ['✨ Vem pro Aura — videochat com o mundo inteiro dentro do Telegram', '🎥 Abrir Aura'],
+  de: ['✨ Komm zu Aura — Videochat mit der ganzen Welt direkt in Telegram', '🎥 Aura öffnen'],
+  tr: ['✨ Aura’ya katıl — Telegram içinde tüm dünyayla görüntülü sohbet', '🎥 Aura’yı aç'],
+  id: ['✨ Gabung Aura — video chat dengan seluruh dunia di Telegram', '🎥 Buka Aura'],
+  en: ['✨ Join me on Aura — video chat with the whole world right inside Telegram', '🎥 Open Aura'],
+};
+async function onSharePrepare(req, res) {
+  const user = validateInitData(req.headers['x-init-data'], cfg.botToken);
+  if (!user || !bot) return json(res, 401, { error: 'auth' });
+  let body = '';
+  try { for await (const c of req) { body += c; if (body.length > 2000) throw new Error('big'); } } catch { return json(res, 413, { error: 'big' }); }
+  try {
+    const { photoUrl } = JSON.parse(body);
+    const base = (cfg.publicUrl || '') + '/s/';
+    if (typeof photoUrl !== 'string' || !photoUrl.startsWith(base) || !stories.file(photoUrl.slice(base.length))) return json(res, 400, { error: 'photo' });
+    const [caption, button] = SHARE_TEXT[String(user.lang || '').slice(0, 2)] || SHARE_TEXT.en;
+    const code = db.refCode(String(user.id));
+    const id = await bot.prepareShare(user.id, { photoUrl, caption: `${caption}\n${cfg.publicUrl}/r/${code}`, button, url: appLink(`ref_${code}`) });
+    db.event('share_prepare', String(user.id));
+    json(res, 200, { id });
+  } catch (e) {
+    console.error('share prepare:', e.message);
+    json(res, 500, { error: 'prepare' });
+  }
+}
+
 // Посадочная страница рекламы (/go?c=…): просмотр и клик «Открыть в Telegram». Без cookies и личных данных.
 const landingHits = new Map(); // ip -> { n, reset }
 async function onLanding(req, res) {
@@ -394,6 +425,7 @@ const server = http.createServer((req, res) => {
   }
   if (url.pathname === '/api/story' && req.method === 'POST') return onStoryUpload(req, res);
   if (url.pathname === '/api/landing' && req.method === 'POST') return onLanding(req, res);
+  if (url.pathname === '/api/share/prepare' && req.method === 'POST') return onSharePrepare(req, res);
   if (url.pathname.startsWith('/api/admin/')) {
     admin.handle(req, res, url).catch(e => { console.error('admin:', e.message); if (!res.headersSent) { res.writeHead(500); res.end(); } });
     return;
@@ -444,7 +476,7 @@ wss.on('connection', (ws, req) => {
     const sp = user.startParam || '';
     let referred = false;
     if (isNew && sp.startsWith('ref_')) {
-      const refId = sp.slice(4);
+      const refId = db.resolveRef(sp.slice(4));
       referred = db.applyReferral(user.id, refId, { days: cfg.referralDays });
       if (referred) {
         const ref = clients.get(refId);

@@ -201,7 +201,11 @@ test('языки, комнаты и реферал через параметр �
   await r2.next('matched');
 
   // Реферал: новый пользователь по ссылке — Premium обоим
-  const fresh = await client(port, 'dev-newbie', { startParam: 'ref_dev-lang-ru' });
+  // Новая ссылка — по публичному коду (не Telegram ID); старый формат ref_<id> тоже работает
+  const code = ru.ready.me.shareLink.split('/r/')[1];
+  assert.match(code, /^[a-z0-9]{6,7}$/);
+  assert.ok(ru.ready.me.refLink.endsWith(`ref_${code}`));
+  const fresh = await client(port, 'dev-newbie', { startParam: `ref_${code}` });
   assert.equal(fresh.ready.referred, true);
   assert.equal(fresh.ready.me.premium, true);
   assert.equal((await ru.next('referral')).t, 'referral');

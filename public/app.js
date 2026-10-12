@@ -864,6 +864,20 @@
     games.start(g);
   };
 
+  // QR-код со ссылкой на Aura: рисуем модули прямо на canvas (библиотека qrcode-generator, MIT)
+  function drawQr(x, text, left, top, size) {
+    if (!window.qrcode || !text) return;
+    const q = window.qrcode(0, 'M');
+    q.addData(text);
+    q.make();
+    const n = q.getModuleCount(), cell = size / n;
+    x.fillStyle = '#1b2440';
+    for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) {
+      if (q.isDark(r, c)) x.fillRect(left + c * cell, top + r * cell, Math.ceil(cell), Math.ceil(cell));
+    }
+  }
+  const shortLink = () => (me.shareLink || 'https://aura-life.online').replace(/^https?:\/\//, '');
+
   // Рисуем вертикальную карточку 1080×1920 в стиле приложения
   async function renderStoryCard({ emoji, title, subtitle, many = false }) {
     await document.fonts?.ready;
@@ -900,32 +914,100 @@
     x.fillText(title, 540, 1080);
     x.font = '500 44px Montserrat, sans-serif';
     x.fillText(subtitle, 540, 1170);
-    x.fillStyle = 'rgba(255,255,255,.95)';
-    x.beginPath(); x.roundRect(240, 1560, 600, 120, 60); x.fill();
+    // Низ карточки: QR-код и короткая ссылка — работают в любой соцсети, даже без кликабельных ссылок
+    x.fillStyle = 'rgba(255,255,255,.96)';
+    x.beginPath(); x.roundRect(110, 1470, 860, 310, 56); x.fill();
+    drawQr(x, me.shareLink || 'https://aura-life.online', 150, 1510, 230);
+    x.textAlign = 'left';
     x.fillStyle = '#4a74f5';
-    x.font = '800 44px Montserrat, sans-serif';
-    x.fillText(t('story_cta'), 540, 1636);
+    x.font = '800 46px Montserrat, sans-serif';
+    x.fillText(t('story_join'), 420, 1590);
+    x.fillStyle = '#5a6080';
+    x.font = '600 34px Montserrat, sans-serif';
+    x.fillText(t('story_scan'), 420, 1650);
+    x.fillStyle = '#1b2440';
+    x.font = '700 32px Montserrat, sans-serif';
+    x.fillText(shortLink(), 420, 1715);
+    x.textAlign = 'center';
     return new Promise(r => c.toBlob(r, 'image/jpeg', 0.9));
   }
 
   async function shareStory(result) {
     try {
       const blob = await renderStoryCard(result);
-      const res = await fetch('/api/story', { method: 'POST', headers: { 'content-type': 'image/jpeg', 'x-init-data': tg?.initData || '' }, body: blob });
-      if (!res.ok) throw new Error(res.status);
-      const { url } = await res.json();
-      if (tg?.initData && tg.isVersionAtLeast?.('7.8')) {
-        const opts = { text: `${result.emoji} ${result.title} — ${appName} ✨` };
-        if (tg.initDataUnsafe?.user?.is_premium && me.refLink) opts.widget_link = { url: me.refLink, name: appName };
-        tg.shareToStory(url, opts);
-      } else {
-        window.open(url, '_blank');
-      }
-      haptic('success');
+      openShare(blob, `${result.emoji} ${result.title} — ${appName} ✨`);
     } catch (e) {
       toast(t('story_fail'));
     }
   }
+
+  // ---------- Поделиться: Telegram Stories, чат Telegram, Instagram/WhatsApp и др., сохранить, ссылка ----------
+  const share = { blob: null, url: null, text: '', preview: null };
+  const tgv = v => Boolean(tg?.initData) && tg.isVersionAtLeast?.(v);
+  function openShare(blob, text) {
+    share.blob = blob; share.url = null; share.text = text;
+    if (share.preview) URL.revokeObjectURL(share.preview);
+    share.preview = URL.createObjectURL(blob);
+    $('share-img').src = share.preview;
+    $('share-story').hidden = !tgv('7.8');
+    $('share-chat').hidden = !tg?.initData;
+    openSheet('sheet-share');
+    haptic('success');
+  }
+  async function shareUploaded() {
+    if (!share.url) share.url = await uploadCard(share.blob);
+    return share.url;
+  }
+  const caption = () => `${share.text}\n${me.shareLink || ''}`.trim();
+  $('share-story').onclick = async () => {
+    try {
+      const url = await shareUploaded();
+      const opts = { text: caption().slice(0, 200) };
+      // Кликабельный виджет-ссылка в Stories доступен авторам с Telegram Premium
+      if (tg.initDataUnsafe?.user?.is_premium && me.refLink) opts.widget_link = { url: me.refLink, name: appName };
+      tg.shareToStory(url, opts);
+    } catch { toast(t('story_fail')); }
+  };
+  $('share-chat').onclick = async () => {
+    try {
+      if (tgv('8.0') && tg.shareMessage) {
+        // Карточка с кнопкой «Открыть Aura» — готовит бот
+        const url = await shareUploaded();
+        const res = await fetch('/api/share/prepare', { method: 'POST', headers: { 'content-type': 'application/json', 'x-init-data': tg.initData }, body: JSON.stringify({ photoUrl: url }) });
+        if (!res.ok) throw new Error(res.status);
+        const { id } = await res.json();
+        tg.shareMessage(id, ok => { if (ok) toast(t('share_sent')); });
+        return;
+      }
+    } catch {}
+    const link = me.shareLink || me.refLink || '';
+    tg?.openTelegramLink?.(`https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent(share.text)}`);
+  };
+  $('share-other').onclick = async () => {
+    const file = new File([share.blob], 'aura.jpg', { type: 'image/jpeg' });
+    if (navigator.canShare?.({ files: [file] })) {
+      try { await navigator.share({ files: [file], text: caption() }); return; } catch (e) { if (e?.name === 'AbortError') return; }
+    }
+    // Системное «Поделиться» недоступно (часто внутри Telegram): сохраняем картинку и копируем ссылку
+    await saveShareImage();
+    copyShareLink(false);
+    toast(t('share_hint'), 6000);
+  };
+  async function saveShareImage() {
+    try {
+      if (tgv('8.0') && tg.downloadFile) { tg.downloadFile({ url: await shareUploaded(), file_name: `aura-${Date.now()}.jpg` }); return; }
+    } catch {}
+    const a = document.createElement('a');
+    a.href = share.preview; a.download = `aura-${Date.now()}.jpg`; a.click();
+  }
+  function copyShareLink(notify = true) {
+    const link = me.shareLink || me.refLink || 'https://aura-life.online';
+    navigator.clipboard?.writeText(link).then(() => notify && toast(t('link_copied')), () => notify && toast(link, 5000));
+  }
+  $('share-save').onclick = () => { saveShareImage(); haptic(); };
+  // Отладка карточек на localhost (вне Telegram)
+  if (!tg?.initData && ['localhost', '127.0.0.1'].includes(location.hostname)) window.__aura = { shareStory };
+  $('share-copy').onclick = () => { copyShareLink(); haptic(); };
 
   // ---------- Реакции поверх видео ----------
   const REACT_EMOJI = { heart: '❤️', laugh: '😂', fire: '🔥', clap: '👏', salute: '🎆' };
@@ -1195,9 +1277,20 @@
     };
     photo(them, 540, 620, -0.035, peerInfo?.country ? flagOf(peerInfo.country) : '');
     photo(mine, 540, 1360, 0.03, me.country ? flagOf(me.country) : '');
+    // Низ: QR и короткая ссылка на Aura, справа дата
+    x.fillStyle = 'rgba(255,255,255,.96)';
+    x.beginPath(); x.roundRect(60, 1745, 150, 150, 22); x.fill();
+    drawQr(x, me.shareLink || 'https://aura-life.online', 72, 1757, 126);
     x.fillStyle = '#fff';
-    x.font = '600 40px Montserrat, sans-serif';
-    x.fillText(new Date().toLocaleDateString(LOCALE, { day: 'numeric', month: 'long', year: 'numeric' }), 540, 1830);
+    x.textAlign = 'left';
+    x.font = '800 38px Montserrat, sans-serif';
+    x.fillText(t('story_join'), 240, 1805);
+    x.font = '600 30px Montserrat, sans-serif';
+    x.fillText(shortLink(), 240, 1855);
+    x.textAlign = 'right';
+    x.font = '600 30px Montserrat, sans-serif';
+    x.fillText(new Date().toLocaleDateString(LOCALE, { day: 'numeric', month: 'short' }), 1020, 1855);
+    x.textAlign = 'center';
     momentBlob = await new Promise(r => c.toBlob(r, 'image/jpeg', 0.88));
     if (momentUrl) URL.revokeObjectURL(momentUrl);
     momentUrl = URL.createObjectURL(momentBlob);
@@ -1210,17 +1303,7 @@
     if (!res.ok) throw new Error(res.status);
     return (await res.json()).url;
   }
-  $('moment-share').onclick = async () => {
-    if (!momentBlob) return;
-    try {
-      const url = await uploadCard(momentBlob);
-      if (tg?.initData && tg.isVersionAtLeast?.('7.8')) {
-        const opts = { text: `📸 ${appName} Moment ✨` };
-        if (tg.initDataUnsafe?.user?.is_premium && me.refLink) opts.widget_link = { url: me.refLink, name: appName };
-        tg.shareToStory(url, opts);
-      } else window.open(url, '_blank');
-    } catch { toast(t('story_fail')); }
-  };
+  $('moment-share').onclick = () => { if (momentBlob) openShare(momentBlob, `📸 ${appName} Moment ✨`); };
   $('moment-save').onclick = async () => {
     if (!momentBlob) return;
     if (tg?.initData && tg.isVersionAtLeast?.('8.0') && tg.downloadFile) {

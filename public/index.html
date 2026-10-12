@@ -382,6 +382,20 @@
     </div>
   </section>
 
+  <section class="lg sheet center" id="sheet-share" hidden>
+    <div class="grip"></div>
+    <h2 data-i="share_title">Поделиться</h2>
+    <img class="share-img" id="share-img" alt="">
+    <div class="share-grid">
+      <button class="share-btn" id="share-story"><i>📱</i><span data-i="share_tg_story">Telegram Stories</span></button>
+      <button class="share-btn" id="share-chat"><i>✈️</i><span data-i="share_tg_chat">В чат Telegram</span></button>
+      <button class="share-btn" id="share-other"><i>📸</i><span data-i="share_other">Instagram, WhatsApp…</span></button>
+      <button class="share-btn" id="share-save"><i>💾</i><span data-i="share_save">Сохранить</span></button>
+      <button class="share-btn wide" id="share-copy"><i>🔗</i><span data-i="share_copy">Скопировать ссылку</span></button>
+    </div>
+    <p class="fine" data-i="share_fine">На картинке есть QR-код и ссылка — по ним откроют Aura, а вы получите бонус за друга</p>
+  </section>
+
   <section class="lg sheet center" id="sheet-duo" hidden>
     <div class="grip"></div>
     <div class="badge duo-badge">👫</div>
@@ -438,6 +452,7 @@
 
   <div class="toasts" id="toasts"></div>
 
+  <script src="vendor/qrcode.js?v=20261011"></script>
   <script src="i18n.js?v=20261011"></script>
   <script src="face.js?v=20261011"></script>
   <script src="mask.js?v=20261011"></script>

@@ -549,3 +549,13 @@ a { color: var(--accent); text-decoration: none; font-weight: 600; }
 .msg.busy { opacity: .6; animation: msg-busy 1s ease-in-out infinite; }
 @keyframes msg-busy { 50% { opacity: .35; } }
 .msg.blocked { text-decoration: line-through; opacity: .5; }
+
+/* Поделиться */
+.share-img { width: min(42vw, 170px); aspect-ratio: 9 / 16; object-fit: cover; border-radius: 18px; box-shadow: var(--lg-shadow); }
+.share-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; width: 100%; }
+.share-btn { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-radius: 18px; background: var(--card); box-shadow: var(--shadow-sm);
+  font-size: 14px; font-weight: 700; color: var(--title); text-align: left; transition: transform .25s var(--spring); }
+.share-btn:active { transform: scale(.96); }
+.share-btn i { font-style: normal; font-size: 20px; }
+.share-btn.wide { grid-column: 1 / -1; justify-content: center; }
+.share-btn[hidden] { display: none; }

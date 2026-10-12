@@ -11,7 +11,7 @@
   <meta property="og:description" content="Один свайп — новый собеседник. Прямо в Telegram.">
   <meta property="og:image" content="https://aura-life.online/brand/cover-ru-640x360.png">
   <meta name="theme-color" content="#4a86f7">
-  <link rel="icon" href="icon.svg">
+  <link rel="icon" href="/icon.svg">
   <style>
     * { box-sizing: border-box; }
     html, body { margin: 0; min-height: 100%; }
@@ -37,7 +37,7 @@
   <div class="blob" style="width:420px;height:420px;right:-170px;top:-160px"></div>
   <div class="blob" style="width:320px;height:320px;left:-150px;bottom:-140px;opacity:.7"></div>
   <main>
-    <img class="logo" src="brand/avatar-640.png" alt="Aura">
+    <img class="logo" src="/brand/avatar-640.png" alt="Aura">
     <h1 id="h1">Видеочат со всем миром</h1>
     <p class="lead" id="lead">Один свайп — новый собеседник. Прямо в Telegram, без регистрации.</p>
     <a class="cta" id="cta" href="https://t.me/you_aura_bot">
@@ -45,7 +45,7 @@
       <span id="cta-text">Открыть в Telegram</span>
     </a>
     <div class="feats" id="feats"></div>
-    <p class="fine" id="fine">18+ · автомодерация · видео не записывается · <a href="terms.html">правила</a> · <a href="privacy.html">конфиденциальность</a></p>
+    <p class="fine" id="fine">18+ · автомодерация · видео не записывается · <a href="/terms.html">правила</a> · <a href="/privacy.html">конфиденциальность</a></p>
   </main>
   <script>
     const T = {
@@ -75,10 +75,12 @@
     document.getElementById('cta-text').textContent = d.cta;
     document.getElementById('feats').innerHTML = d.feats.map(([i, t]) => `<div class="feat"><i>${i}</i>${t}</div>`).join('');
     document.getElementById('fine').firstChild.textContent = d.fine + ' · ';
-    const tg = `https://t.me/you_aura_bot?start=ad_${code}`;
+    // /r/<id> — ссылка из карточки пользователя: сразу в приложение с его реферальным бонусом
+    const ref = (q.get('r') || '').replace(/[^\w-]/g, '').slice(0, 40);
+    const tg = ref ? `https://t.me/you_aura_bot/app?startapp=ref_${ref}` : `https://t.me/you_aura_bot?start=ad_${code}`;
     document.getElementById('cta').href = tg;
     // Отметка перехода (без cookies и личных данных) и клика по кнопке
-    const ping = ev => navigator.sendBeacon?.('/api/landing', JSON.stringify({ c: code, ev }));
+    const ping = ev => navigator.sendBeacon?.('/api/landing', JSON.stringify({ c: ref ? 'share' : code, ev }));
     ping('view');
     document.getElementById('cta').addEventListener('click', () => ping('click'));
   </script>

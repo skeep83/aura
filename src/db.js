@@ -29,6 +29,7 @@ const USER_COLUMNS = {
   salutes_received: 'INTEGER NOT NULL DEFAULT 0',
   country: "TEXT NOT NULL DEFAULT ''",
   source: "TEXT NOT NULL DEFAULT ''",
+  ref_code: "TEXT NOT NULL DEFAULT ''",
 };
 
 // Пользователи, жалобы, платежи, комнаты, оценки. SQLite в одном файле — хватает на один процесс.
@@ -107,6 +108,7 @@ export class Db {
     for (const [col, def] of Object.entries(USER_COLUMNS)) {
       if (!have.has(col)) this.db.exec(`ALTER TABLE users ADD COLUMN ${col} ${def}`);
     }
+    this.db.exec("CREATE INDEX IF NOT EXISTS users_ref_code ON users (ref_code) WHERE ref_code != ''");
   }
 
   exists(id) { return Boolean(this.db.prepare('SELECT 1 FROM users WHERE id = ?').get(id)); }
@@ -332,6 +334,24 @@ export class Db {
       const tag = r.source === 'affiliate' ? 'affiliate' : r.source.replace(/^ad:/, 'ad_');
       return { ...r, botStarts: starts[tag] || 0, landingViews: landing[tag]?.views || 0, landingClicks: landing[tag]?.clicks || 0 };
     });
+  }
+
+  // Публичный код для ссылок (aura-life.online/r/<код>) — чтобы не светить Telegram ID в соцсетях
+  refCode(id) {
+    const u = this.user(id);
+    if (u.ref_code) return u.ref_code;
+    for (;;) {
+      const code = crypto.randomBytes(6).toString('base64url').replace(/[-_]/g, '').slice(0, 7).toLowerCase();
+      if (code.length < 6 || this.db.prepare('SELECT 1 FROM users WHERE ref_code = ?').get(code)) continue;
+      this.db.prepare('UPDATE users SET ref_code = ? WHERE id = ?').run(code, id);
+      return code;
+    }
+  }
+  // ref_<код> или старый формат ref_<Telegram ID>
+  resolveRef(ref) {
+    if (!ref) return null;
+    const byCode = this.db.prepare('SELECT id FROM users WHERE ref_code = ?').get(ref);
+    return byCode ? byCode.id : this.exists(ref) ? ref : null;
   }
 
   // ---------- Рефералы: оба получают бонус, только для нового пользователя ----------
