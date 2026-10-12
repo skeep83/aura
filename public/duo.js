@@ -35,6 +35,16 @@ window.AuraDuo = (() => {
       }
     }
 
+    // Telegram на компьютере не пускает видео со звуком без нажатия — тогда без звука, звук по касанию
+    function playTile(v) {
+      v.play().catch(e => {
+        if (e?.name !== 'NotAllowedError') return;
+        v.muted = true;
+        v.play().catch(() => {});
+        document.addEventListener('pointerdown', () => { v.muted = false; v.play().catch(() => {}); }, { capture: true, once: true });
+      });
+    }
+
     function connect(info) {
       const pc = new RTCPeerConnection({ iceServers: getIce() });
       const { tile, video } = tileFor(info.slot, info);
@@ -42,7 +52,7 @@ window.AuraDuo = (() => {
       peers.set(info.slot, peer);
       grid.append(tile);
       for (const t of getTracks()) pc.addTrack(t.track, t.stream);
-      pc.ontrack = e => { if (video.srcObject !== e.streams[0]) { video.srcObject = e.streams[0]; video.play().catch(() => {}); } };
+      pc.ontrack = e => { if (video.srcObject !== e.streams[0]) { video.srcObject = e.streams[0]; playTile(video); } };
       pc.onicecandidate = e => { if (e.candidate) send({ t: 'duo_signal', to: info.slot, data: { candidate: e.candidate } }); };
       pc.onconnectionstatechange = () => {
         if (pc.connectionState === 'connected' && !peer.connected) {
@@ -55,6 +65,7 @@ window.AuraDuo = (() => {
         }
       };
       if (you < info.slot) {
+        window.auraPreferCodecs?.(pc);
         pc.createOffer()
           .then(o => pc.setLocalDescription(o))
           .then(() => send({ t: 'duo_signal', to: info.slot, data: { sdp: pc.localDescription } }))
@@ -88,6 +99,7 @@ window.AuraDuo = (() => {
         if (data.sdp) {
           await pc.setRemoteDescription(data.sdp);
           if (data.sdp.type === 'offer') {
+            window.auraPreferCodecs?.(pc);
             await pc.setLocalDescription(await pc.createAnswer());
             send({ t: 'duo_signal', to: from, data: { sdp: pc.localDescription } });
           }

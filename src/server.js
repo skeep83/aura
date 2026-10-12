@@ -1057,7 +1057,7 @@ wss.on('connection', (ws, req) => {
           const n = v => Number.isFinite(Number(v)) ? Math.round(Number(v)) : '-';
           const tag = `${clean(msg.platform, 12)}/${clean(msg.os, 4)} ${msg.paused ? 'PAUSED' : 'play'}${msg.muted ? '+muted' : ''}`
             + ` in=${n(msg.inW)}x${n(msg.inH)}@${n(msg.inFps)} dec=${n(msg.dec)} drop=${n(msg.drop)} ${clean(msg.codec, 16)}`
-            + ` out=${n(msg.outW)}x${n(msg.outH)}@${n(msg.outFps)} ql=${clean(msg.ql, 10)} cam=${n(msg.camW)}x${n(msg.camH)}`;
+            + ` out=${clean(msg.ocodec, 16)} ${n(msg.outW)}x${n(msg.outH)}@${n(msg.outFps)} ql=${clean(msg.ql, 10)} cam=${n(msg.camW)}x${n(msg.camH)}`;
           db.event('video_stats', client.id, 0, tag);
           console.log(`video ${tag}`);
           break;

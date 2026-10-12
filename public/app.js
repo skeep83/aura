@@ -226,6 +226,20 @@
   // Видео собеседника идёт со звуком, а встроенный браузер Telegram на компьютере не пускает звук без
   // нажатия — видео тогда стоит на первом (ещё мутном) кадре. Запускаем без звука, звук — по любому касанию.
   let soundBlocked = false;
+  // Telegram для компьютера (macOS/Windows) плохо справляется с H.264 от телефонов: входящие кадры
+  // отбрасываются (собеседник замер), исходящее — 320×180 при 4 к/с. VP8 обрабатывается программно
+  // везде, поэтому в этих клиентах ставим его первым — и в предложении, и в ответе.
+  function preferCodecs(p) {
+    if (!['tdesktop', 'macos', 'unigram'].includes(tg?.platform)) return;
+    const caps = window.RTCRtpReceiver?.getCapabilities?.('video')?.codecs;
+    if (!caps?.some(c => /vp8/i.test(c.mimeType))) return;
+    const rank = c => /vp8/i.test(c.mimeType) ? 0 : /h264/i.test(c.mimeType) ? 2 : 1;
+    const sorted = [...caps].sort((a, b) => rank(a) - rank(b));
+    for (const t of p.getTransceivers()) {
+      if (t.receiver?.track?.kind === 'video') try { t.setCodecPreferences?.(sorted); } catch {}
+    }
+  }
+  window.auraPreferCodecs = preferCodecs;
   async function playRemote() {
     if (!el.remote.srcObject || !el.remote.paused) return;
     try { await el.remote.play(); return; }
@@ -251,7 +265,7 @@
       send({ t: 'diag', kind: 'video', platform: tg?.platform || 'web', os: desktopOs(),
         paused: el.remote.paused, muted: el.remote.muted, vw: el.remote.videoWidth, vh: el.remote.videoHeight,
         inW: inb.frameWidth, inH: inb.frameHeight, inFps: inb.framesPerSecond, dec: inb.framesDecoded, drop: inb.framesDropped,
-        codec: codecs.get(inb.codecId), outW: out.frameWidth, outH: out.frameHeight, outFps: out.framesPerSecond,
+        codec: codecs.get(inb.codecId), ocodec: codecs.get(out.codecId), outW: out.frameWidth, outH: out.frameHeight, outFps: out.framesPerSecond,
         ql: out.qualityLimitationReason, camW: cam.width, camH: cam.height });
     } catch {}
   }
@@ -333,6 +347,7 @@
     connectTimer = setTimeout(() => { if (state === 'connecting') reportConn(false, 'timeout').finally(next); }, 15_000);
 
     if (initiator) {
+      preferCodecs(pc);
       await pc.setLocalDescription(tuneSdp(await pc.createOffer()));
       send({ t: 'signal', data: { sdp: pc.localDescription } });
     }
@@ -395,6 +410,7 @@
       if (data.sdp) {
         await pc.setRemoteDescription(data.sdp);
         if (data.sdp.type === 'offer') {
+          preferCodecs(pc);
           await pc.setLocalDescription(tuneSdp(await pc.createAnswer()));
           send({ t: 'signal', data: { sdp: pc.localDescription } });
         }
