@@ -364,6 +364,52 @@
       countries: ['Indonesia'],
       text: 'Video chat dengan seluruh dunia langsung di Telegram 🌍 Sekali geser — orang baru. Cocok berdasarkan bahasa, tanpa daftar. Coba Aura ✨' },
   ];
+  // Группы объявлений Meta (Facebook/Instagram): цель «Трафик», клики по ссылке, 18–34, Advantage+ размещения
+  const META = [
+    { code: 'fb_cis_1', name: 'RU · СНГ', lang: 'ru', langName: 'Русский', price: 'дёшево',
+      countries: ['Kazakhstan', 'Belarus', 'Uzbekistan', 'Moldova', 'Kyrgyzstan', 'Armenia', 'Georgia', 'Azerbaijan'],
+      primary: 'Видеочат со всем миром прямо в Telegram 🌍 Один свайп — новый собеседник. Подбор по языку, без регистрации.', headline: 'Aura — видеочат в Telegram' },
+    { code: 'fb_ru_eu_1', name: 'RU · Русскоязычные в ЕС', lang: 'ru', langName: 'Русский', price: 'средне', eu: true,
+      countries: ['Germany', 'Latvia', 'Estonia', 'Lithuania', 'Poland', 'Czech Republic', 'Cyprus', 'Spain', 'Italy', 'France', 'Netherlands', 'Finland'],
+      primary: 'Скучаешь по живому общению на русском? 🎥 Aura — видеочат прямо в Telegram: один свайп — новый собеседник.', headline: 'Видеочат на русском — в Telegram' },
+    { code: 'fb_en_t1', name: 'EN · Англоязычные страны', lang: 'en', langName: 'English (All)', price: 'дорого',
+      countries: ['United States', 'United Kingdom', 'Canada', 'Australia', 'Ireland', 'New Zealand'],
+      primary: 'Video chat with the whole world right inside Telegram 🌍 One swipe — a new person. Matched by language, no sign-up.', headline: 'Aura — video chat in Telegram' },
+    { code: 'fb_en_eu', name: 'EN · Европа на английском', lang: 'en', langName: 'English (All)', price: 'средне', eu: true,
+      countries: ['Netherlands', 'Sweden', 'Denmark', 'Norway', 'Finland', 'Belgium', 'Portugal', 'Greece', 'Poland', 'Czech Republic', 'Romania'],
+      primary: 'Meet people from all over Europe and beyond 🌍 Random video chats matched by language — right inside Telegram, no sign-up.', headline: 'Video chat with Europe' },
+    { code: 'fb_en_learn', name: 'EN · Практика английского', lang: 'en', langName: 'English (All)', price: 'дёшево',
+      countries: ['India', 'Philippines', 'Nigeria', 'Pakistan', 'Egypt', 'Malaysia', 'Vietnam', 'Indonesia'],
+      primary: 'Practice English with real people 🇬🇧 Aura matches you by language: random video chats with people worldwide, right in Telegram.', headline: 'Speak English with the world' },
+    { code: 'fb_de_1', name: 'DE · Германия, Австрия, Швейцария', lang: 'de', langName: 'Deutsch', price: 'средне', eu: true,
+      countries: ['Germany', 'Austria', 'Switzerland'],
+      primary: 'Videochat mit der ganzen Welt direkt in Telegram 🌍 Ein Wisch — eine neue Person. Nach Sprache, ohne Anmeldung.', headline: 'Aura — Videochat in Telegram' },
+    { code: 'fb_es_eu', name: 'ES · Испания', lang: 'es', langName: 'Español', price: 'средне', eu: true,
+      countries: ['Spain'],
+      primary: 'Videochat con todo el mundo dentro de Telegram 🌍 Un deslizamiento — otra persona. Por idioma, sin registro.', headline: 'Aura — videochat en Telegram' },
+    { code: 'fb_es_1', name: 'ES · Латинская Америка', lang: 'es', langName: 'Español', price: 'дёшево',
+      countries: ['Mexico', 'Argentina', 'Colombia', 'Chile', 'Peru'],
+      primary: 'Videochat con todo el mundo dentro de Telegram 🌍 Un deslizamiento — otra persona. Por idioma, sin registro.', headline: 'Aura — videochat en Telegram' },
+    { code: 'fb_pt_1', name: 'PT · Бразилия и Португалия', lang: 'pt', langName: 'Português', price: 'дёшево', eu: true,
+      countries: ['Brazil', 'Portugal'],
+      primary: 'Videochat com o mundo inteiro dentro do Telegram 🌍 Um deslize — uma nova pessoa. Por idioma, sem cadastro.', headline: 'Aura — videochat no Telegram' },
+  ];
+  function renderMeta() {
+    const row = (label, value, copy = value) => `<div class="camp-row"><span class="muted">${label}</span><b>${esc(value)}</b><button class="btn ghost sm" data-text="${esc(copy)}">⧉</button></div>`;
+    $('meta-camps').innerHTML = META.map(c => {
+      const url = `https://aura-life.online/go?c=${c.code}&lang=${c.lang}`;
+      return `<details class="camp"><summary><b>${esc(c.name)}</b><span>${c.eu ? '<span class="tag">ЕС</span> ' : ''}<span class="tag">${esc(c.price)}</span></span></summary>
+        <p class="muted small">Цель «Трафик» · клики по ссылке · 18–34 · Advantage+ размещения · $5–7/день · кнопка «Подробнее»${c.eu ? ' · <b>ЕС: заполните «Бенефициар и плательщик»</b>' : ''}</p>
+        ${row('Страны', c.countries.join(', '))}
+        ${row('Язык', c.langName)}
+        ${row('Ссылка', url)}
+        ${row('Основной текст', c.primary)}
+        ${row('Заголовок', c.headline)}
+        ${row('Креативы', `aura-${c.lang}-story.mp4 + aura-${c.lang}-square.png`)}
+      </details>`;
+    }).join('');
+  }
+
   function adLinks() {
     const code = ($('ad-code').value.trim().replace(/[^\w-]/g, '').slice(0, 40)) || 'CODE';
     $('ad-bot-link').value = (state.adBase?.botLink || '').replace('ad_CODE', 'ad_' + code);
@@ -375,6 +421,7 @@
     adLinks();
     const link = code => (state.adBase?.botLink || '').replace('ad_CODE', 'ad_' + code);
     const row = (label, value, copy = value) => `<div class="camp-row"><span class="muted">${label}</span><b>${esc(value)}</b><button class="btn ghost sm" data-text="${esc(copy)}">⧉</button></div>`;
+    renderMeta();
     $('ad-texts').innerHTML = CAMPAIGNS.map(c => `<details class="camp"><summary><b>${esc(c.name)}</b><span class="tag">${esc(c.price)}</span></summary>
       <p class="muted small">Target: Users · Message in Channel · Mobile · без «Politics & Incidents» · картинка бота · On Hold</p>
       ${row('Заголовок', `Aura ${c.code}`)}
