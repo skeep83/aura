@@ -527,8 +527,32 @@ function json(res, status, body) {
   res.end(JSON.stringify(body));
 }
 
+// ---------- Вход в браузере (компьютер): Telegram Desktop/Web не дают Mini App камеру ----------
+// Mini App выдаёт одноразовый код на 5 минут → aura-life.online/?login=<код> в браузере →
+// сервер меняет его на сессию на 30 дней (подпись HMAC от токена бота, без хранения на сервере).
+const handoffs = new Map(); // code -> { userId, exp }
+const SESSION_DAYS = 30;
+const sessionKey = () => crypto.createHash('sha256').update('aura-session:' + cfg.botToken).digest();
+function makeSession(userId, now = Date.now()) {
+  const body = `${userId}.${now + SESSION_DAYS * DAY}`;
+  return `${body}.${crypto.createHmac('sha256', sessionKey()).update(body).digest('base64url')}`;
+}
+function checkSession(token, now = Date.now()) {
+  const m = /^([\w-]{1,40})\.(\d{13})\.([\w-]{43})$/.exec(String(token || ''));
+  if (!m || Number(m[2]) < now) return null;
+  const want = crypto.createHmac('sha256', sessionKey()).update(`${m[1]}.${m[2]}`).digest('base64url');
+  return crypto.timingSafeEqual(Buffer.from(want), Buffer.from(m[3])) ? m[1] : null;
+}
+function userFromSession(id, startParam = '') {
+  if (!id || !db.exists(id)) return null;
+  const u = db.user(id);
+  return { id, lang: u.lang || 'en', name: u.name || '', username: u.username || '', allowsPm: Boolean(u.allows_pm), startParam, web: true };
+}
+setInterval(() => { const now = Date.now(); for (const [k, v] of handoffs) if (v.exp < now) handoffs.delete(k); }, 60_000).unref();
+
 async function onStoryUpload(req, res) {
   const user = validateInitData(req.headers['x-init-data'], cfg.botToken)
+    || (checkSession(req.headers['x-session']) ? { id: checkSession(req.headers['x-session']) } : null)
     || (cfg.devAnon ? { id: 'dev' } : null);
   if (!user) return json(res, 401, { error: 'auth' });
   try {
@@ -634,6 +658,14 @@ wss.on('connection', (ws, req) => {
 
   async function auth(msg) {
     let user = validateInitData(msg.initData, cfg.botToken);
+    let session = null;
+    if (!user && msg.login) {
+      // Одноразовый код из Mini App → сессия браузера
+      const h = handoffs.get(String(msg.login));
+      handoffs.delete(String(msg.login));
+      if (h && h.exp > Date.now()) { user = userFromSession(h.userId, String(msg.startParam || '')); if (user) session = makeSession(user.id); }
+    }
+    if (!user && msg.session) user = userFromSession(checkSession(msg.session), String(msg.startParam || ''));
     if (!user && cfg.devAnon) {
       user = {
         id: msg.devId?.match?.(/^dev-[\w-]{4,40}$/) ? msg.devId : 'dev-' + crypto.randomUUID().slice(0, 8),
@@ -647,7 +679,7 @@ wss.on('connection', (ws, req) => {
     const until = db.bannedUntil(user.id);
     if (until) { send({ t: 'banned', until }); return ws.close(4004, 'banned'); }
 
-    db.touch(user.id, user);
+    if (!user.web) db.touch(user.id, user); else db.touch(user.id, { ...user, lang: user.lang });
     const sp = user.startParam || '';
     let referred = false;
     if (isNew && sp.startsWith('ref_')) {
@@ -676,7 +708,7 @@ wss.on('connection', (ws, req) => {
       matches: db.matchCount(user.id),
       reveal: Boolean(u.reveal), country: /^[A-Z]{2}$/.test(country) && !['XX', 'T1'].includes(country) ? country
         : cfg.devAnon && /^[A-Z]{2}$/.test(msg.devCountry || '') ? msg.devCountry : '',
-      minorHist: [],
+      minorHist: [], fromTelegram: !user.web && !String(user.id).startsWith('dev-') || (cfg.devAnon && !user.web),
       send, close: reason => ws.close(4005, reason),
     };
     if (!client.premium && !db.filterLeft(client.id, today(), cfg.freeFilterPerDay)) client.want = 'any';
@@ -712,6 +744,7 @@ wss.on('connection', (ws, req) => {
       liveInvite: sp.startsWith('live_') ? liveInviteInfo(sp.slice(5)) : null,
       callInvite: sp.startsWith('call_') ? { code: sp.slice(5) } : null,
     });
+    if (session) { send({ t: 'session', token: session }); db.event('web_login', user.id); }
     if (client.callFrom) {
       const caller = clients.get(client.callFrom);
       if (caller?.call?.with === client.id) { client.call = { with: caller.id, role: 'callee', timer: null }; send({ t: 'call_incoming', from: cardOf(caller) }); }
@@ -1016,6 +1049,15 @@ wss.on('connection', (ws, req) => {
         console.log(`conn ${msg.ok ? 'ok' : 'FAIL'} ${tag} turn=${Boolean(msg.turn)}`);
         break;
       }
+      case 'diag': {
+        // Почему не включилась камера (имя ошибки, клиент Telegram, ОС) — без личных данных, до 5 на подключение
+        if ((client.diags = (client.diags || 0) + 1) > 5) break;
+        const clean = (v, n = 40) => String(v ?? '').replace(/[^\w .:,()-]/g, '').slice(0, n);
+        const tag = `${clean(msg.name)} ${clean(msg.platform, 12)}/${clean(msg.ver, 8)}/${clean(msg.os, 4)} ${clean(msg.msg, 80)}`.trim();
+        db.event('cam_fail', client.id, 0, tag);
+        console.log(`cam FAIL ${tag}`);
+        break;
+      }
       case 'rate':
         onRate(msg);
         break;
@@ -1101,6 +1143,16 @@ wss.on('connection', (ws, req) => {
         db.liveSub(String(msg.code || '').slice(0, 20), client.id, Boolean(msg.on));
         send({ t: 'live', state: 'offline', code: msg.code, title: liveInviteInfo(String(msg.code || '')).title, subscribed: Boolean(msg.on) });
         break;
+      case 'handoff': {
+        // Ссылка «открыть в браузере» — только из настоящего Mini App, не чаще раза в 10 с
+        if (!client.fromTelegram || Date.now() - (client.lastHandoff || 0) < 10_000) return;
+        client.lastHandoff = Date.now();
+        const code = crypto.randomBytes(16).toString('hex');
+        handoffs.set(code, { userId: client.id, exp: Date.now() + 5 * 60_000 });
+        send({ t: 'handoff', url: `${cfg.publicUrl || ''}/?login=${code}` });
+        db.event('handoff', client.id);
+        break;
+      }
       case 'crowd':
         db.setCrowd(client.id, Boolean(msg.on));
         db.event(msg.on ? 'crowd_on' : 'crowd_off', client.id);

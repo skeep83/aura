@@ -161,11 +161,21 @@
   }
 
   // ---------- Камера ----------
+  // WebView в Telegram для компьютера капризнее браузера: если полный запрос не прошёл (не запрет), пробуем проще
   async function startCamera() {
-    localStream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: facing, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30, max: 30 } },
-      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-    });
+    if (!navigator.mediaDevices?.getUserMedia) throw Object.assign(new Error('getUserMedia unavailable'), { name: 'NoMediaDevices' });
+    const tries = [
+      { video: { facingMode: facing, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30, max: 30 } },
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } },
+      { video: true, audio: true },
+      { video: true },
+    ];
+    let err = null;
+    for (const c of tries) {
+      try { localStream = await navigator.mediaDevices.getUserMedia(c); err = null; break; }
+      catch (e) { err = e; if (e?.name === 'NotAllowedError' || e?.name === 'SecurityError') break; }
+    }
+    if (err) throw err;
     el.local.srcObject = localStream;
     el.selfBg.srcObject = localStream; // своя камера в размытии на фоне поиска
   }
@@ -255,7 +265,7 @@
 
     pc.ontrack = e => {
       if (el.remote.srcObject !== e.streams[0]) el.remote.srcObject = e.streams[0];
-      el.remote.play().catch(() => {});
+      el.remote.play().catch(playBlocked);
     };
     pc.onicecandidate = e => { if (e.candidate) send({ t: 'signal', data: { candidate: e.candidate } }); };
     pc.onconnectionstatechange = () => {
@@ -377,8 +387,11 @@
   function connect() {
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
     ws = new WebSocket(`${proto}://${location.host}/ws`);
+    const q = new URLSearchParams(location.search);
     ws.onopen = () => send({
       t: 'auth', initData: tg?.initData || '', tz: -new Date().getTimezoneOffset(),
+      // Браузер на компьютере: одноразовый код из Mini App или сохранённая сессия
+      ...(tg?.initData ? {} : { login: q.get('login') || '', session: store.get('auraSession') || '' }),
       ...(tg?.initData ? {} : { devId: devId(), startParam: new URLSearchParams(location.search).get('startapp') || '', devCountry: new URLSearchParams(location.search).get('country') || '' }),
     });
     ws.onmessage = e => handle(JSON.parse(e.data));
@@ -529,6 +542,14 @@
         break;
       case 'banned': onBanned(msg.until, msg.reason); break;
       case 'react': onReact(msg.kind); break;
+      case 'session':
+        store.set('auraSession', msg.token);
+        history.replaceState(null, '', location.pathname);
+        break;
+      case 'handoff':
+        if (tg?.initData && tg.openLink) tg.openLink(msg.url); else window.open(msg.url, '_blank');
+        toast(t('desk_opened'), 5000);
+        break;
       case 'friend_added': case 'friends': case 'calling': case 'call_incoming': case 'call_declined':
       case 'call_timeout': case 'call_cancelled': case 'call_error': case 'call_ended':
         onCallMessage(msg);
@@ -1343,7 +1364,7 @@
     haptic('success');
   }
   async function uploadCard(blob) {
-    const res = await fetch('/api/story', { method: 'POST', headers: { 'content-type': 'image/jpeg', 'x-init-data': tg?.initData || '' }, body: blob });
+    const res = await fetch('/api/story', { method: 'POST', headers: { 'content-type': 'image/jpeg', 'x-init-data': tg?.initData || '', 'x-session': store.get('auraSession') || '' }, body: blob });
     if (!res.ok) throw new Error(res.status);
     return (await res.json()).url;
   }
@@ -2030,10 +2051,24 @@
   $('consent').onchange = updateStart;
 
   // Перед системным запросом камеры — короткое объяснение: так больше людей нажимают «Разрешить»
+  // Telegram Desktop на macOS запускает видео только после действия пользователя: play() на каждом
+  // <video> внутри нажатия снимает запрет для этого элемента навсегда, дальше play() работает и без нажатия
+  function unlockMedia() {
+    for (const v of [el.local, el.selfBg, el.remote]) if (v.paused) v.play()?.catch?.(() => {});
+  }
+  document.addEventListener('pointerdown', unlockMedia, true);
+  document.addEventListener('keydown', unlockMedia, true);
+  let tapHinted = false;
+  function playBlocked(e) {
+    if (e?.name !== 'NotAllowedError' || tapHinted) return;
+    tapHinted = true;
+    toast(t('cam_tap'), 5000);
+  }
   async function cameraGranted() {
     try { return (await navigator.permissions?.query({ name: 'camera' }))?.state === 'granted'; } catch { return false; }
   }
   $('start').onclick = async () => {
+    unlockMedia();
     if (!store.get('camPrimed') && !(await cameraGranted())) {
       $('cam-mask').checked = maskOn;
       openSheet('sheet-cam');
@@ -2042,24 +2077,42 @@
     begin();
   };
   $('cam-allow').onclick = () => {
+    unlockMedia();
     store.set('camPrimed', '1');
     if ($('cam-mask').checked !== maskOn) { store.set('maskDefault', $('cam-mask').checked ? '1' : '0'); maskOn = $('cam-mask').checked; renderMaskDefault(); }
     closeSheet();
     begin();
   };
-  $('camd-retry').onclick = () => { closeSheet(); begin(); };
-  function camDeniedHelp() {
-    const p = tg?.platform || '';
+  $('camd-retry').onclick = () => { unlockMedia(); closeSheet(); begin(); };
+  const isDesktopTg = () => Boolean(tg?.initData) && ['tdesktop', 'macos', 'weba', 'webk', 'web', 'unigram'].includes(tg.platform);
+  function openInBrowser() { send({ t: 'handoff' }); haptic(); }
+  $('camd-browser').onclick = () => { closeSheet(); openInBrowser(); };
+  const desktopOs = () => {
+    const s = navigator.userAgentData?.platform || navigator.platform || navigator.userAgent || '';
+    return /win/i.test(s) ? 'win' : /mac/i.test(s) ? 'mac' : '';
+  };
+  // Подсказка по коду ошибки и системе; браузер — запасной путь, только если в Telegram не вышло
+  function camDeniedHelp(e) {
+    const p = tg?.platform || '', name = e?.name || '';
+    $('camd-browser').hidden = !isDesktopTg();
+    if (name === 'NotReadableError' || name === 'TrackStartError' || name === 'AbortError') return t('camd_busy');
+    if (name === 'NotFoundError' || name === 'DevicesNotFoundError' || name === 'OverconstrainedError') return t('camd_nocam');
+    if (isDesktopTg()) {
+      const os = desktopOs();
+      return t(os === 'mac' ? 'camd_mac' : os === 'win' ? 'camd_win' : 'camd_desktop');
+    }
     return t(p === 'ios' ? 'camd_ios' : p === 'android' || p === 'android_x' ? 'camd_android' : 'camd_other');
   }
   async function begin() {
     $('start').disabled = true;
     try {
       await startCamera();
-    } catch {
+    } catch (e) {
+      send({ t: 'diag', kind: 'cam', name: e?.name, msg: e?.message, platform: tg?.platform, ver: tg?.version, os: desktopOs() });
       $('cam-error').hidden = false;
       $('cam-error').textContent = t('cam_error');
-      $('camd-text').textContent = camDeniedHelp();
+      $('camd-text').textContent = camDeniedHelp(e);
+      $('camd-code').textContent = [e?.name || 'Error', tg?.platform, tg?.version, desktopOs()].filter(Boolean).join(' · ');
       openSheet('sheet-cam-denied');
       updateStart();
       haptic('error');

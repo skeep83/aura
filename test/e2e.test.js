@@ -576,3 +576,24 @@ test('Языковой обмен: настройка в профиле и од�
   assert.equal((await until(a, 'me', m => m.me.exchange === null)).me.exchange, null);
   a.ws.close(); b.ws.close();
 });
+
+test('Компьютер: одноразовый код из Mini App → вход в браузере → сессия на 30 дней', async t => {
+  const port = await startServer(t);
+  const app = await client(port, 'dev-desk-1');
+  app.send({ t: 'handoff' });
+  const { url } = await app.next('handoff');
+  const code = new URL(url, 'http://x').searchParams.get('login');
+  assert.match(code, /^[0-9a-f]{32}$/);
+  const web = await client(port, undefined, { login: code });
+  assert.equal(web.ready.me.shareLink, app.ready.me.shareLink); // тот же пользователь
+  const { token } = await web.next('session');
+  web.ws.close();
+  const again = await client(port, undefined, { session: token });
+  assert.equal(again.ready.me.shareLink, app.ready.me.shareLink);
+  // Код одноразовый, подделанная сессия не принимается (в dev — новый анонимный пользователь)
+  const reuse = await client(port, undefined, { login: code });
+  assert.notEqual(reuse.ready.me.shareLink, app.ready.me.shareLink);
+  const forged = await client(port, undefined, { session: token.slice(0, -3) + 'AAA' });
+  assert.notEqual(forged.ready.me.shareLink, app.ready.me.shareLink);
+  for (const c of [app, again, reuse, forged]) c.ws.close();
+});
