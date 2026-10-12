@@ -104,7 +104,8 @@ export function createBot({ token, site, stateFile, appName, adminIds, supportCo
 
     switch (cmd.split('@')[0]) {
       case '/start': {
-        const param = /^(room_|ref_|duo_)[\w-]{1,40}$|^wrapped$/.test(arg) ? arg : '';
+        const param = /^(room_|ref_|duo_|ad_)[\w-]{1,40}$|^wrapped$/.test(arg) ? arg : '';
+        if (param.startsWith('ad_')) db.event('bot_start', from, 0, param);
         const p = profile[pickLang(msg.from?.language_code)];
         return reply(chatId, p.description, param ? linkButton(p.button, appLink(param)) : appButton(p.button));
       }

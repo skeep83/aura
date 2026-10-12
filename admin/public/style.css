@@ -205,3 +205,12 @@ nav .badge { margin-left: auto; min-width: 22px; height: 20px; padding: 0 6px; b
 .ai-ask textarea { flex: 1; height: auto; min-height: 44px; padding: 10px 14px; resize: vertical; font: inherit; }
 .chips-row .tag { cursor: pointer; border: 1px solid var(--line); }
 .ai-review { margin-top: 10px; padding: 12px 14px; border-radius: 14px; background: var(--hover); border: 1px solid var(--line); white-space: pre-wrap; font-size: 13px; }
+
+/* Реклама */
+.copy-row { display: flex; gap: 8px; }
+.copy-row input { flex: 1; min-width: 0; font-size: 12px; }
+.ad-texts { display: flex; flex-direction: column; gap: 10px; }
+.ad-text { padding: 12px 14px; border-radius: 14px; background: var(--hover); border: 1px solid var(--line); display: flex; gap: 10px; align-items: flex-start; }
+.ad-text p { margin: 0; flex: 1; }
+.ad-text small { display: block; color: var(--muted); font-size: 11px; margin-top: 4px; }
+#src-days { height: 28px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg2); color: var(--text); font-size: 12px; margin-left: 4px; }

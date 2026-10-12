@@ -6,7 +6,7 @@ const DAY = 24 * 60 * 60 * 1000;
 const HOUR = 60 * 60 * 1000;
 const FOREVER = 8.64e15;
 
-export function createAdmin({ db, ai, cfg, token, live, isOnline, kick, refresh, refund, notify, startedAt = Date.now() }) {
+export function createAdmin({ db, ai, appLink = () => '', botUsername = () => '', cfg, token, live, isOnline, kick, refresh, refund, notify, startedAt = Date.now() }) {
   const sql = db.db;
   const all = (q, ...a) => sql.prepare(q).all(...a);
   const get = (q, ...a) => sql.prepare(q).get(...a);
@@ -248,6 +248,11 @@ export function createAdmin({ db, ai, cfg, token, live, isOnline, kick, refresh,
           case 'rooms': return send(200, rooms()), true;
           case 'config': return send(200, config()), true;
           case 'ai': return send(200, ai.publicConfig()), true;
+          case 'sources': {
+            const days = Math.max(1, Math.min(365, Number(qs.days) || 30));
+            const bot = botUsername();
+            return send(200, { days, sources: db.sourceStats(days), appLink: appLink('ad_CODE'), botLink: bot ? `https://t.me/${bot}?start=ad_CODE` : '' }), true;
+          }
         }
       } else if (req.method === 'POST') {
         const body = await readJson(req);

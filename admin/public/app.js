@@ -69,7 +69,7 @@
   $('logout-btn').onclick = async () => { await fetch('/auth/logout', { method: 'POST' }); showLogin(); };
 
   // ---------- Навигация ----------
-  const TITLES = { overview: 'Обзор', users: 'Пользователи', reports: 'Жалобы', payments: 'Платежи', moderation: 'Модерация', rooms: 'Комнаты', ai: 'ИИ', system: 'Система' };
+  const TITLES = { overview: 'Обзор', users: 'Пользователи', reports: 'Жалобы', payments: 'Платежи', moderation: 'Модерация', rooms: 'Комнаты', ads: 'Реклама', ai: 'ИИ', system: 'Система' };
   const state = { page: 'overview', days: 30, series: null, overview: null, users: { q: '', filter: '', sort: 'recent', offset: 0, limit: 50 } };
   function go(page) {
     state.page = page;
@@ -84,7 +84,7 @@
 
   async function load() {
     try {
-      const loader = { overview: loadOverview, users: loadUsers, reports: loadReports, payments: loadPayments, moderation: loadModeration, rooms: loadRooms, ai: loadAI, system: loadSystem }[state.page];
+      const loader = { overview: loadOverview, users: loadUsers, reports: loadReports, payments: loadPayments, moderation: loadModeration, rooms: loadRooms, ads: loadAds, ai: loadAI, system: loadSystem }[state.page];
       await loader();
       $('updated').textContent = 'обновлено ' + new Date().toLocaleTimeString('ru-RU');
     } catch (e) { if (e.message !== 'login') toast('Ошибка: ' + e.message, true); }
@@ -332,6 +332,42 @@
     catch (e) { box.textContent = e.message === 'ai_off' ? 'ИИ выключен — включите его в разделе «ИИ».' : 'Не получилось: ' + e.message; }
     btn.disabled = false;
   }
+
+  // ---------- Реклама ----------
+  const AD_TEXTS = [
+    ['ru', 'Видеочат со всем миром прямо в Telegram 🌍 Один свайп — новый собеседник. Подбор по языку, без регистрации. Залетай в Aura ✨'],
+    ['ru', 'Скучно вечером? 🎥 Aura — видеорулетка в Telegram: случайные люди со всего мира, игры в звонке, маска для стеснительных 🎭'],
+    ['ru', 'Собери паспорт из 50 стран, не выходя из дома 🛂 Aura — живые видеоразговоры с людьми со всего мира прямо в Telegram'],
+    ['en', 'Video chat with the whole world right inside Telegram 🌍 One swipe — a new person. Matched by language, no sign-up. Try Aura ✨'],
+    ['en', 'Practice English with real people 🇬🇧 Aura matches you by language: random video chats with people worldwide, right in Telegram'],
+    ['es', 'Videochat con todo el mundo dentro de Telegram 🌍 Un deslizamiento — otra persona. Por idioma, sin registro. Prueba Aura ✨'],
+  ];
+  function adLinks() {
+    const code = ($('ad-code').value.trim().replace(/[^\w-]/g, '').slice(0, 40)) || 'CODE';
+    $('ad-bot-link').value = (state.adBase?.botLink || '').replace('ad_CODE', 'ad_' + code);
+    $('ad-app-link').value = (state.adBase?.appLink || '').replace('ad_CODE', 'ad_' + code);
+  }
+  async function loadAds() {
+    const d = await api('sources?days=' + $('src-days').value);
+    state.adBase = d;
+    adLinks();
+    $('ad-texts').innerHTML = AD_TEXTS.map(([l, t]) => `<div class="ad-text"><p>${esc(t)}<small>${l.toUpperCase()} · ${[...t].length} симв.</small></p><button class="btn ghost sm" data-text="${esc(t)}">Копировать</button></div>`).join('');
+    const pct = (a, b) => b ? Math.round(100 * a / b) + '%' : '—';
+    const NAME = s => s === 'direct' ? 'Напрямую' : s === 'ref' ? 'Приглашения друзей' : s === 'duo' ? 'Duo-приглашения' : s.startsWith('ad:') ? `📣 ${s.slice(3)}` : s.startsWith('room:') ? `📢 комната ${s.slice(5)}` : s;
+    $('sources-table').innerHTML = `<thead><tr><th>Источник</th><th class="num">/start в боте</th><th class="num">Открыли приложение</th><th class="num">Поговорили</th><th class="num">Вернулись</th><th class="num">Заплатили</th><th class="num">⭐</th></tr></thead><tbody>${
+      d.sources.map(r => `<tr><td><b>${esc(NAME(r.source))}</b></td><td class="num">${r.source.startsWith('ad:') ? fmt(r.botStarts) : '—'}</td><td class="num">${fmt(r.users)}</td>
+        <td class="num">${fmt(r.talked)} <small class="muted">${pct(r.talked, r.users)}</small></td><td class="num">${fmt(r.returned)} <small class="muted">${pct(r.returned, r.users)}</small></td>
+        <td class="num">${fmt(r.payers)} <small class="muted">${pct(r.payers, r.users)}</small></td><td class="num">${fmt(r.stars)}</td></tr>`).join('')
+      || '<tr><td colspan="7" class="empty">Пока нет новых пользователей за период</td></tr>'}</tbody>`;
+  }
+  $('ad-code').oninput = adLinks;
+  $('src-days').onchange = loadAds;
+  $('page-ads').onclick = e => {
+    const b = e.target.closest('[data-copy],[data-text]');
+    if (!b) return;
+    const text = b.dataset.text || $(b.dataset.copy).value;
+    navigator.clipboard?.writeText(text).then(() => toast('Скопировано'), () => toast('Скопируйте вручную', true));
+  };
 
   // ---------- ИИ ----------
   let aiCfg = null;

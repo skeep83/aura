@@ -369,6 +369,12 @@ test('админ-API: без токена закрыт, с токеном — о
   assert.equal((await call('users/dev-adm-a/unban', { method: 'POST', body: {} })).data.ok, true);
   assert.equal((await call('users/dev-adm-a')).data.user.bannedUntil, 0);
 
+  const ad = await client(port, 'dev-adm-ad', { startParam: 'ad_ru_test' });
+  const src = (await call('sources?days=7')).data;
+  assert.ok(src.appLink.includes('ad_CODE'));
+  ad.ws.close();
+  assert.equal((await call('users/dev-adm-ad')).data.user.id, 'dev-adm-ad');
+
   const s = (await call('series?days=7')).data;
   assert.equal(s.length, 7);
   assert.ok(s.at(-1).matches >= 1);

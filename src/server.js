@@ -287,7 +287,7 @@ function kick(id, banned = true) {
 
 // Админ-API для панели на TrueNAS (/api/admin/*, Bearer ADMIN_API_TOKEN)
 const admin = createAdmin({
-  db, ai, token: env.ADMIN_API_TOKEN || '',
+  db, ai, appLink, botUsername: () => cfg.botUsername || bot_?.username || '', token: env.ADMIN_API_TOKEN || '',
   cfg: {
     ...cfg, moderationUrl: env.MODERATION_URL || '', nsfwThreshold: Number(env.NSFW_THRESHOLD || 0.85),
     minorThreshold: Number(env.MINOR_THRESHOLD || 0.8),
@@ -309,6 +309,15 @@ const admin = createAdmin({
   },
   notify: (id, text) => bot?.notify(id, text),
 });
+
+// Откуда пришёл пользователь: рекламная кампания (ad_<код>), комната канала, приглашение, Duo
+function sourceOf(sp, room) {
+  if (/^ad_[\w-]{1,40}$/.test(sp)) return `ad:${sp.slice(3)}`;
+  if (sp.startsWith('room_')) return `room:${room || '?'}`;
+  if (sp.startsWith('ref_')) return 'ref';
+  if (sp.startsWith('duo_')) return 'duo';
+  return 'direct';
+}
 
 // Бывший собеседник автоматически ищет дальше
 function requeue(c) { if (c) mm.enqueue(c); }
@@ -444,7 +453,9 @@ wss.on('connection', (ws, req) => {
     clients.set(user.id, client);
     if (client.country) db.setCountry(client.id, client.country);
     if (sp.startsWith('duo_')) setTimeout(() => clients.get(client.id) === client && onDuo({ t: 'duo_join', code: sp.slice(4) }), 0);
-    db.event('session', client.id, 0, sp.startsWith('room_') ? `room:${room || '?'}` : sp.startsWith('ref_') ? 'ref' : '');
+    const source = sourceOf(sp, room);
+    if (isNew) db.setSource(client.id, source);
+    db.event('session', client.id, 0, source === 'direct' ? '' : source);
     const ice = await iceServers(user.id);
     if (clients.get(user.id) !== client) return;
     send({

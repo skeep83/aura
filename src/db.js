@@ -28,6 +28,7 @@ const USER_COLUMNS = {
   salutes: 'INTEGER NOT NULL DEFAULT 0',
   salutes_received: 'INTEGER NOT NULL DEFAULT 0',
   country: "TEXT NOT NULL DEFAULT ''",
+  source: "TEXT NOT NULL DEFAULT ''",
 };
 
 // Пользователи, жалобы, платежи, комнаты, оценки. SQLite в одном файле — хватает на один процесс.
@@ -300,6 +301,25 @@ export class Db {
     this.db.prepare('UPDATE users SET premium_until = MAX(0, premium_until - ?) WHERE id = ?')
       .run(days * DAY, p.user_id);
     return p;
+  }
+
+  // ---------- Источники (реклама, комнаты, рефералы): первое касание и конверсии ----------
+  setSource(id, source) {
+    this.db.prepare("UPDATE users SET source = ? WHERE id = ? AND source = ''").run(String(source).slice(0, 64), id);
+  }
+  sourceStats(days = 30, now = Date.now()) {
+    const since = now - days * DAY;
+    const rows = this.db.prepare(`
+      SELECT CASE WHEN u.source = '' THEN 'direct' ELSE u.source END AS source,
+        COUNT(*) AS users,
+        SUM(EXISTS(SELECT 1 FROM events e WHERE e.user_id = u.id AND e.type = 'match')) AS talked,
+        SUM(EXISTS(SELECT 1 FROM events e WHERE e.user_id = u.id AND e.type = 'session' AND e.at > u.created_at + 20 * 3600000)) AS returned,
+        SUM(EXISTS(SELECT 1 FROM payments p WHERE p.user_id = u.id AND p.refunded = 0)) AS payers,
+        COALESCE(SUM((SELECT SUM(stars) FROM payments p WHERE p.user_id = u.id AND p.refunded = 0)), 0) AS stars
+      FROM users u WHERE u.created_at > ? AND u.id NOT LIKE 'dev-%' GROUP BY 1 ORDER BY users DESC`).all(since);
+    const starts = Object.fromEntries(this.db.prepare(
+      "SELECT tag, COUNT(DISTINCT user_id) AS n FROM events WHERE type = 'bot_start' AND at > ? GROUP BY tag").all(since).map(r => [r.tag, r.n]));
+    return rows.map(r => ({ ...r, botStarts: starts[r.source.replace(/^ad:/, 'ad_')] || 0 }));
   }
 
   // ---------- Рефералы: оба получают бонус, только для нового пользователя ----------

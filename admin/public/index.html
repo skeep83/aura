@@ -33,6 +33,7 @@
         <a data-page="payments"><i>⭐</i>Платежи</a>
         <a data-page="moderation"><i>🛡</i>Модерация</a>
         <a data-page="rooms"><i>📢</i>Комнаты</a>
+        <a data-page="ads"><i>📣</i>Реклама</a>
         <a data-page="ai"><i>✨</i>ИИ</a>
         <a data-page="system"><i>⚙</i>Система</a>
       </nav>
@@ -104,6 +105,26 @@
 
       <section class="page" id="page-rooms" hidden>
         <div class="card flush"><table class="table" id="rooms-table"></table></div>
+      </section>
+
+      <section class="page" id="page-ads" hidden>
+        <div class="grid2">
+          <div class="card ai-form">
+            <h3>Ссылка для кампании</h3>
+            <p class="muted small">Своя ссылка на каждое объявление — так видно, какое из них приводит людей и деньги. Код: латиница, цифры, «_» и «-».</p>
+            <label>Код кампании<input id="ad-code" placeholder="например, ru_dating_oct" maxlength="40"></label>
+            <label>Ссылка на бота — для Telegram Ads<div class="copy-row"><input id="ad-bot-link" readonly><button class="btn ghost sm" type="button" data-copy="ad-bot-link">Копировать</button></div></label>
+            <label>Ссылка сразу в приложение — для постов и блогеров<div class="copy-row"><input id="ad-app-link" readonly><button class="btn ghost sm" type="button" data-copy="ad-app-link">Копировать</button></div></label>
+          </div>
+          <div class="card">
+            <h3>Готовые тексты (до 160 символов)</h3>
+            <div class="ad-texts" id="ad-texts"></div>
+          </div>
+        </div>
+        <div class="card flush" style="margin-top:16px">
+          <div class="card-head pad"><h3>Источники за <select id="src-days"><option value="7">7 дней</option><option value="30" selected>30 дней</option><option value="90">90 дней</option></select></h3></div>
+          <table class="table" id="sources-table"></table>
+        </div>
       </section>
 
       <section class="page" id="page-ai" hidden>
