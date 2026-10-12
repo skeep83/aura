@@ -579,3 +579,7 @@ a { color: var(--accent); text-decoration: none; font-weight: 600; }
 .cam-list i { font-style: normal; font-size: 20px; flex: none; }
 .cam-mask { display: flex; align-items: center; gap: 10px; font-size: 14px; font-weight: 600; color: var(--text); cursor: pointer; }
 .cam-mask input { width: 20px; height: 20px; accent-color: #4a86f7; }
+
+.crowd-pill { display: inline-flex; align-items: center; gap: 8px; color: #fff; margin-top: 10px; font-size: 13px; }
+.crowd-pill i { font-style: normal; }
+.crowd-pill.on { background: rgba(62,214,139,.35); }

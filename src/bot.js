@@ -44,6 +44,15 @@ export function createBot({ token, site, stateFile, appName, adminIds, supportCo
     }
   }
 
+  // «Позовите, когда соберутся»: в Aura сейчас много людей на языке подписчика
+  async function notifyCrowd(users) {
+    for (const { id, lang, n, spoken } of users) {
+      const name = (() => { try { return new Intl.DisplayNames([lang || 'en'], { type: 'language' }).of(spoken); } catch { return spoken; } })();
+      await notify(id, note(lang, 'crowd', { app: appName, n, lang: name }), appButton(note(lang, 'open')));
+      await new Promise(r => setTimeout(r, 40));
+    }
+  }
+
   function createInvoiceLink(userId, planId) {
     const plan = plans[planId];
     if (!plan) throw new Error('unknown plan');
@@ -280,7 +289,7 @@ export function createBot({ token, site, stateFile, appName, adminIds, supportCo
   }
 
   return {
-    start, createInvoiceLink, notify, remindEvent, sendWrapped, setMenu, refund, prepareShare,
+    start, createInvoiceLink, notify, remindEvent, notifyCrowd, sendWrapped, setMenu, refund, prepareShare,
     get username() { return self.username; },
   };
 }

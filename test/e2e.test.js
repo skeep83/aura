@@ -481,3 +481,21 @@ test('Jev: модерация чата вероятностями, разбор 
   assert.equal(risk.risk.score, 3);
   c.ws.close();
 });
+
+test('Aura Hour по местному времени: событие идёт у того, у кого сейчас 21:00 по его часам', async t => {
+  // Начало события = текущее время UTC минус 10 минут → у клиента с UTC+0 оно идёт, у пояса по умолчанию (UTC+3) — нет
+  const d = new Date(Date.now() - 10 * 60_000);
+  const time = `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
+  const port = await startServer(t, { EVENT_TIME: time, TZ_OFFSET_HOURS: '3', EVENT_MINUTES: '30' });
+  const utc = await client(port, 'dev-tz-utc', { tz: 0 });
+  const msk = await client(port, 'dev-tz-msk', { tz: 180 });
+  const unknown = await client(port, 'dev-tz-none');
+  assert.equal(utc.ready.event.active, true);
+  assert.equal(msk.ready.event.active, false);
+  assert.equal(unknown.ready.event.active, false);
+  // Подписка «позовите, когда соберутся»
+  utc.send({ t: 'crowd', on: true });
+  const me = await until(utc, 'me', m => m.me.crowd === true);
+  assert.equal(me.me.crowdMin, 8);
+  for (const c of [utc, msk, unknown]) c.ws.close();
+});

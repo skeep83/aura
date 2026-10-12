@@ -260,3 +260,21 @@ test('новичок: сначала «хороший» собеседник, н
   mm3.tick(t0 + 41_000);
   assert.equal(mm3.peerOf(nb), bad);
 });
+
+test('«позовите, когда соберутся»: подписчик по языку, не чаще раза в 20 часов, только с разрешением писать', () => {
+  const db = new Db(':memory:');
+  const now = Date.now();
+  db.touch('u1', { allowsPm: true, lang: 'ru' }, now);
+  db.setProfile('u1', { gender: 'm', want: 'any', langs: ['ru', 'en'] });
+  db.touch('u2', { allowsPm: false, lang: 'en' }, now);
+  db.setProfile('u2', { gender: 'f', want: 'any', langs: ['en'] });
+  db.setCrowd('u1', true, now);
+  db.setCrowd('u2', true, now);
+  assert.deepEqual(db.crowdAudience('en', now).map(u => u.id), ['u1']); // u2 не разрешил писать
+  assert.deepEqual(db.crowdAudience('de', now), []);
+  db.markCrowdNotified('u1', now);
+  assert.deepEqual(db.crowdAudience('en', now + 60_000), []);
+  assert.deepEqual(db.crowdAudience('en', now + 21 * 3600_000).map(u => u.id), ['u1']);
+  db.setCrowd('u1', false, now);
+  assert.deepEqual(db.crowdAudience('en', now + 21 * 3600_000), []);
+});

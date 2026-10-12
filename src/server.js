@@ -65,6 +65,8 @@ const plans = {
 const FREE_REACTIONS = ['heart', 'laugh', 'fire', 'clap'];
 const COMPLIMENTS = ['smile', 'funny', 'smart', 'kind', 'voice', 'world'];
 const GUESS_MS = 20_000;
+// «Позовите, когда соберутся»: порог людей онлайн на языке подписчика
+const CROWD_MIN = Number(env.CROWD_MIN || 8);
 // Варианты для «Угадай, откуда он»: популярные страны аудитории
 const GUESS_POOL = ['RU', 'UA', 'KZ', 'BY', 'UZ', 'MD', 'RO', 'PL', 'DE', 'FR', 'IT', 'ES', 'PT', 'GB', 'US', 'BR', 'MX', 'AR', 'TR', 'IN', 'ID', 'VN', 'EG', 'GE', 'AM', 'AZ', 'KG', 'IL', 'CZ', 'NL'];
 
@@ -267,6 +269,7 @@ function profileOf(c) {
     refLink: appLink(`ref_${db.refCode(c.id)}`), shareLink: `${cfg.publicUrl || ''}/r/${db.refCode(c.id)}`, referrals: u.referrals,
     reveal: Boolean(c.reveal), country: c.country || null, passport: db.passport(c.id),
     salutes: u.salutes, salutesReceived: u.salutes_received, compliments: db.complimentsOf(c.id),
+    crowd: u.crowd_until > Date.now(), crowdMin: CROWD_MIN,
   };
 }
 
@@ -283,8 +286,22 @@ function onlineFor(c) {
   return n;
 }
 
-function eventInfo(now = Date.now()) {
-  const s = schedule.state(now);
+// Aura Hour идёт в EVENT_TIME по местному времени каждого человека (часовой пояс присылает клиент)
+const DEFAULT_TZ = Math.round(cfg.tzOffset * 60);
+const schedules = new Map();
+function scheduleFor(tz = DEFAULT_TZ) {
+  if (!schedules.has(tz)) {
+    schedules.set(tz, new EventSchedule({
+      time: env.EVENT_TIME || '21:00', tzOffsetHours: tz / 60,
+      minutes: Number(env.EVENT_MINUTES || 60), roundSeconds: Number(env.ROUND_SECONDS || 180),
+    }));
+  }
+  return schedules.get(tz);
+}
+const tzOf = c => (Number.isInteger(c?.tz) ? c.tz : DEFAULT_TZ);
+const inEvent = (c, now = Date.now()) => scheduleFor(tzOf(c)).state(now).active;
+function eventInfo(c = null, now = Date.now()) {
+  const s = scheduleFor(tzOf(c)).state(now);
   return { active: s.active, startsAt: s.startsAt, endsAt: s.endsAt, roundMs: s.roundMs, time: env.EVENT_TIME || '21:00' };
 }
 
@@ -543,6 +560,11 @@ wss.on('connection', (ws, req) => {
     };
     if (!client.premium && !db.filterLeft(client.id, today(), cfg.freeFilterPerDay)) client.want = 'any';
     setStanding(client, u);
+    // Часовой пояс устройства (минуты к UTC) — для Aura Hour по местному времени
+    const tz = Number(msg.tz);
+    if (Number.isInteger(tz) && tz >= -720 && tz <= 840) { client.tz = tz; if (tz !== u.tz_min) db.setTz(user.id, tz); }
+    else if (u.tz_min !== -10000) client.tz = u.tz_min;
+    client.eventActive = inEvent(client);
     clients.set(user.id, client);
     if (client.country) db.setCountry(client.id, client.country);
     if (sp.startsWith('duo_')) setTimeout(() => clients.get(client.id) === client && onDuo({ t: 'duo_join', code: sp.slice(4) }), 0);
@@ -553,7 +575,7 @@ wss.on('connection', (ws, req) => {
     if (clients.get(user.id) !== client) return;
     send({
       t: 'ready', appName: cfg.appName, ice, me: profileOf(client), online: onlineFor(client),
-      isNew, referred, room: roomInfo(client), event: eventInfo(), langs: LANGS,
+      isNew, referred, room: roomInfo(client), event: eventInfo(client), langs: LANGS,
       moderation: moderation.enabled ? { intervalMs: cfg.frameIntervalMs } : null,
       plans: Object.fromEntries(Object.entries(plans).map(([k, p]) => [k, { title: p.title, stars: p.stars, kind: p.kind || 'premium', count: p.count || 0 }])),
       payments: Boolean(bot) || cfg.devAnon, emojiStatusId: cfg.emojiStatusId || null,
@@ -877,6 +899,11 @@ wss.on('connection', (ws, req) => {
       case 'guess':
         onGuess(msg);
         break;
+      case 'crowd':
+        db.setCrowd(client.id, Boolean(msg.on));
+        db.event(msg.on ? 'crowd_on' : 'crowd_off', client.id);
+        send({ t: 'me', me: profileOf(client) });
+        break;
       case 'wrapped': {
         const w = db.wrapped(client.id);
         send({ t: 'wrapped', data: w });
@@ -982,31 +1009,64 @@ setInterval(() => {
   for (const c of clients.values()) c.send({ t: 'online', n: onlineFor(c) });
 }, 5_000).unref();
 
-// Aura Hour: старт/конец события, раунды, напоминания
-let eventActive = schedule.state().active;
-let remindedKey = null;
+// Aura Hour: у каждого — в его местные 21:00. Старт/конец для каждого клиента, раунды — если событие идёт у обоих
 setInterval(() => {
   const now = Date.now();
-  const s = schedule.state(now);
-  if (s.active !== eventActive) {
-    eventActive = s.active;
-    const msg = { t: 'event', event: eventInfo(now) };
-    for (const c of clients.values()) c.send(msg);
+  for (const c of clients.values()) {
+    const active = inEvent(c, now);
+    if (active !== c.eventActive) { c.eventActive = active; c.send({ t: 'event', event: eventInfo(c, now) }); }
   }
-  if (s.active) {
-    for (const [a, b] of mm.pairsOlderThan(s.roundMs, now)) {
-      a.send({ t: 'round_end' });
-      mm.leave(a, { t: 'round_end' }, now); // b получит round_end как уведомление о разрыве
-      mm.enqueue(a, now);
-      mm.enqueue(b, now);
-    }
-  }
-  const key = schedule.reminderDue(now);
-  if (key && key !== remindedKey && bot) {
-    remindedKey = key;
-    bot.remindEvent(db.eventAudience(now).filter(u => !clients.has(u.id)));
+  const roundMs = schedule.roundMs;
+  for (const [a, b] of mm.pairsOlderThan(roundMs, now)) {
+    if (!a.eventActive || !b.eventActive || a.live || b.live || a.call || b.call) continue;
+    a.send({ t: 'round_end' });
+    mm.leave(a, { t: 'round_end' }, now); // b получит round_end как уведомление о разрыве
+    mm.enqueue(a, now);
+    mm.enqueue(b, now);
   }
 }, 1_000).unref();
+
+// «Позовите, когда соберутся»: раз в минуту считаем онлайн по языкам и зовём подписчиков, если людей ≥ CROWD_MIN
+let crowdBusy = false;
+setInterval(async () => {
+  if (!bot || crowdBusy) return;
+  const perLang = new Map();
+  for (const c of clients.values()) for (const l of c.langs || []) perLang.set(l, (perLang.get(l) || 0) + 1);
+  const now = Date.now();
+  const batch = [];
+  for (const [lang, n] of perLang) {
+    if (n < CROWD_MIN) continue;
+    for (const u of db.crowdAudience(lang, now)) {
+      if (clients.has(u.id) || batch.some(b => b.id === u.id)) continue;
+      db.markCrowdNotified(u.id, now);
+      batch.push({ ...u, n, spoken: lang });
+    }
+  }
+  if (!batch.length) return;
+  crowdBusy = true;
+  try {
+    console.log(`crowd: зовём ${batch.length}`);
+    await bot.notifyCrowd(batch);
+    for (const u of batch) db.event('crowd_notify', u.id, u.n, u.spoken);
+  } catch (e) { console.error('crowd:', e.message); }
+  crowdBusy = false;
+}, 60_000).unref();
+
+// Напоминания об Aura Hour — по часовым поясам, за 5 минут до местного начала
+const reminded = new Set();
+setInterval(() => {
+  if (!bot) return;
+  const now = Date.now();
+  const zones = new Set([DEFAULT_TZ, ...db.eventTimezones(now)]);
+  for (const tz of zones) {
+    const key = scheduleFor(tz).reminderDue(now);
+    if (!key || reminded.has(`${tz}:${key}`)) continue;
+    reminded.add(`${tz}:${key}`);
+    const users = db.eventAudience(now, tz, DEFAULT_TZ).filter(u => !clients.has(u.id));
+    if (users.length) bot.remindEvent(users).catch(e => console.error('remind:', e.message));
+  }
+  if (reminded.size > 500) reminded.clear();
+}, 30_000).unref();
 
 // Aura Wrapped: в воскресенье в 19:00 по времени аудитории — недельные итоги в бот (один раз за неделю)
 const wrappedFile = path.join(DATA_DIR, 'wrapped.week');

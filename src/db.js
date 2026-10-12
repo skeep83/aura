@@ -30,6 +30,9 @@ const USER_COLUMNS = {
   country: "TEXT NOT NULL DEFAULT ''",
   source: "TEXT NOT NULL DEFAULT ''",
   ref_code: "TEXT NOT NULL DEFAULT ''",
+  tz_min: 'INTEGER NOT NULL DEFAULT -10000',      // смещение от UTC в минутах; -10000 — неизвестно
+  crowd_until: 'INTEGER NOT NULL DEFAULT 0',      // «позовите, когда соберутся» — подписка до
+  crowd_notified_at: 'INTEGER NOT NULL DEFAULT 0',
 };
 
 // Пользователи, жалобы, платежи, комнаты, оценки. SQLite в одном файле — хватает на один процесс.
@@ -427,10 +430,28 @@ export class Db {
   roomMatch(slug) { this.db.prepare('UPDATE rooms SET matches = matches + 1 WHERE slug = ?').run(slug); }
 
   // Кому напомнить о событии: разрешили писать, не отписались, заходили за 14 дней, не забанены
-  eventAudience(now = Date.now()) {
+  // Aura Hour по местному времени: кому напоминать в данном часовом поясе (tz = null — пояс по умолчанию + неизвестные)
+  eventAudience(now = Date.now(), tz = null, defaultTz = null) {
+    const where = tz === null ? '' : tz === defaultTz ? 'AND (tz_min = ? OR tz_min = -10000)' : 'AND tz_min = ?';
     return this.db.prepare(`SELECT id, lang FROM users WHERE allows_pm = 1 AND notify_events = 1
-      AND last_seen > ? AND banned_until <= ? AND id NOT LIKE 'dev-%'`).all(now - 14 * DAY, now);
+      AND last_seen > ? AND banned_until <= ? AND id NOT LIKE 'dev-%' ${where}`).all(now - 14 * DAY, now, ...(tz === null ? [] : [tz]));
   }
+  eventTimezones(now = Date.now()) {
+    return this.db.prepare(`SELECT DISTINCT tz_min AS tz FROM users WHERE allows_pm = 1 AND notify_events = 1
+      AND last_seen > ? AND tz_min != -10000`).all(now - 14 * DAY).map(r => r.tz);
+  }
+  setTz(id, tz) { this.db.prepare('UPDATE users SET tz_min = ? WHERE id = ?').run(tz, id); }
+
+  // «Позовите, когда соберутся»: подписка на 14 дней, не чаще раза в 20 часов
+  setCrowd(id, on, now = Date.now()) {
+    this.db.prepare('UPDATE users SET crowd_until = ? WHERE id = ?').run(on ? now + 14 * DAY : 0, id);
+  }
+  crowdAudience(lang, now = Date.now()) {
+    return this.db.prepare(`SELECT id, lang FROM users WHERE crowd_until > ? AND allows_pm = 1 AND banned_until <= ?
+      AND crowd_notified_at < ? AND (',' || langs || ',') LIKE ? AND id NOT LIKE 'dev-%'`)
+      .all(now, now, now - 20 * 60 * 60 * 1000, `%,${lang},%`);
+  }
+  markCrowdNotified(id, now = Date.now()) { this.db.prepare('UPDATE users SET crowd_notified_at = ? WHERE id = ?').run(now, id); }
 
   langOf(id) { return this.db.prepare('SELECT lang FROM users WHERE id = ?').get(id)?.lang || ''; }
 

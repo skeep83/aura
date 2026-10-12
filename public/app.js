@@ -128,7 +128,20 @@
   }
 
   // Оверлей поиска: waiting | connecting | idle | null (скрыт, идёт разговор)
+  // «Позовите, когда соберутся»: кнопка появляется, если поиск затянулся
+  let crowdTimer = null;
+  function renderCrowd() {
+    $('crowd-text').textContent = me.crowd ? t('crowd_on', { n: me.crowdMin || 8 }) : t('crowd_btn', { n: me.crowdMin || 8 });
+    $('crowd-btn').classList.toggle('on', Boolean(me.crowd));
+  }
+  function showCrowdLater(mode) {
+    clearTimeout(crowdTimer);
+    $('crowd-btn').hidden = true;
+    if (mode !== 'waiting' && mode !== 'idle') return;
+    crowdTimer = setTimeout(() => { renderCrowd(); $('crowd-btn').hidden = false; }, mode === 'idle' ? 0 : 8000);
+  }
   function setOverlay(mode) {
+    showCrowdLater(mode);
     $('chat').classList.toggle('idle', Boolean(mode));
     el.searching.classList.toggle('gone', !mode);
     el.searching.classList.toggle('paused', mode === 'idle');
@@ -361,7 +374,7 @@
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
     ws = new WebSocket(`${proto}://${location.host}/ws`);
     ws.onopen = () => send({
-      t: 'auth', initData: tg?.initData || '',
+      t: 'auth', initData: tg?.initData || '', tz: -new Date().getTimezoneOffset(),
       ...(tg?.initData ? {} : { devId: devId(), startParam: new URLSearchParams(location.search).get('startapp') || '', devCountry: new URLSearchParams(location.search).get('country') || '' }),
     });
     ws.onmessage = e => handle(JSON.parse(e.data));
@@ -1009,6 +1022,16 @@
   // Отладка карточек на localhost (вне Telegram)
   if (!tg?.initData && ['localhost', '127.0.0.1'].includes(location.hostname)) window.__aura = { shareStory };
   $('share-copy').onclick = () => { copyShareLink(); haptic(); };
+
+  $('crowd-btn').onclick = () => {
+    const on = !me.crowd;
+    if (on) requestPm();
+    send({ t: 'crowd', on });
+    me.crowd = on;
+    renderCrowd();
+    toast(t(on ? 'crowd_toast' : 'crowd_off', { n: me.crowdMin || 8 }), 3500);
+    haptic(on ? 'success' : 'light');
+  };
 
   // ---------- Реакции поверх видео ----------
   const REACT_EMOJI = { heart: '❤️', laugh: '😂', fire: '🔥', clap: '👏', salute: '🎆' };
