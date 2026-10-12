@@ -236,3 +236,27 @@ test('db: паспорт и воронка метрик', () => {
   assert.equal(f.matches, 1);
   assert.equal(f.quickSkipPct, 50);
 });
+
+test('новичок: сначала «хороший» собеседник, не человек с плохой репутацией', () => {
+  const mkc = (id, extra = {}) => ({ id, langs: ['ru'], gender: 'm', want: 'any', send() {}, ...extra });
+  const t0 = 1_000_000;
+  // plain и good ищут девушек и друг с другом не сводятся; новичок-девушка выбирает good, хотя plain ждёт дольше
+  const mm = new Matchmaker();
+  const plain = mkc('plain', { want: 'f' }), good = mkc('good', { want: 'f', good: true }), newbie = mkc('newbie', { gender: 'f', newbie: true });
+  mm.enqueue(plain, t0); mm.enqueue(good, t0 + 1); mm.enqueue(newbie, t0 + 2);
+  assert.equal(mm.peerOf(newbie), good);
+  // Обычный пользователь по-прежнему берёт того, кто ждёт дольше
+  const mm1 = new Matchmaker();
+  const p1 = mkc('p1', { want: 'f' }), g1 = mkc('g1', { want: 'f', good: true }), u1 = mkc('u1', { gender: 'f' });
+  mm1.enqueue(p1, t0); mm1.enqueue(g1, t0 + 1); mm1.enqueue(u1, t0 + 2);
+  assert.equal(mm1.peerOf(u1), p1);
+  // Новичок и человек с плохой репутацией не сводятся, пока оба не прождут 40 с
+  const mm3 = new Matchmaker();
+  const nb = mkc('nb', { newbie: true }), bad = mkc('bad', { tier: 'low', newbie: false });
+  mm3.enqueue(bad, t0); mm3.enqueue(nb, t0);
+  assert.equal(mm3.peerOf(nb), null);
+  mm3.tick(t0 + 20_000);
+  assert.equal(mm3.peerOf(nb), null);
+  mm3.tick(t0 + 41_000);
+  assert.equal(mm3.peerOf(nb), bad);
+});

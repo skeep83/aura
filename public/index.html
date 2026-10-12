@@ -382,6 +382,28 @@
     </div>
   </section>
 
+  <section class="lg sheet center" id="sheet-cam" hidden>
+    <div class="grip"></div>
+    <div class="badge cam-badge">🎥</div>
+    <h2 data-i="cam_title">Камера и микрофон</h2>
+    <p class="sheet-sub" data-i="cam_sub">Aura — видеочат, поэтому Telegram спросит доступ к камере</p>
+    <ul class="cam-list">
+      <li><i>👀</i><span data-i="cam_p1">Вас видит только собеседник — и только во время разговора</span></li>
+      <li><i>🚫</i><span data-i="cam_p2">Видео идёт напрямую и не записывается</span></li>
+      <li><i>🛡</i><span data-i="cam_p3">ИИ-модерация 18+ в каждом разговоре, жалоба — одним тапом</span></li>
+    </ul>
+    <label class="cam-mask"><input type="checkbox" id="cam-mask"><span data-i="cam_mask">Начать в маске 🎭 — лицо закрыто эмодзи</span></label>
+    <button class="btn-grad" id="cam-allow"><span data-i="cam_allow">Разрешить и начать</span></button>
+  </section>
+
+  <section class="lg sheet center" id="sheet-cam-denied" hidden>
+    <div class="grip"></div>
+    <div class="badge warn">🔒</div>
+    <h2 data-i="camd_title">Нет доступа к камере</h2>
+    <p class="sheet-sub" id="camd-text"></p>
+    <button class="btn-grad" id="camd-retry"><span data-i="camd_retry">Попробовать снова</span></button>
+  </section>
+
   <section class="lg sheet center" id="sheet-share" hidden>
     <div class="grip"></div>
     <h2 data-i="share_title">Поделиться</h2>

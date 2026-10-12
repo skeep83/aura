@@ -111,6 +111,15 @@ function auraOf(u) {
   };
 }
 
+// Новичок — первые 3 разговора: его сводим с «хорошими» (аура ≥ 110, не новички, без плохой репутации)
+const NEWBIE_MATCHES = 3;
+function setStanding(c, u = db.user(c.id)) {
+  const a = auraOf(u);
+  c.tier = a.tier;
+  c.newbie = (c.matches || 0) < NEWBIE_MATCHES;
+  c.good = !c.newbie && a.tier === 'ok' && a.points >= 110;
+}
+
 // ---------- «Угадай, откуда он»: первые 20 с страна собеседника скрыта ----------
 function shuffle(a) { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
 function guessOptions(answer, mine) {
@@ -147,7 +156,8 @@ const mm = new Matchmaker({
     return { gender: o.gender, langs: common, country: o.country || null };
   },
   onPair(a, b, now, waits = [0, 0]) {
-    [a, b].forEach((c, i) => db.event('match', c.id, waits[i]));
+    [a, b].forEach((c, i) => db.event('match', c.id, waits[i], c.newbie ? 'newbie' : ''));
+    for (const c of [a, b]) { c.matches = (c.matches || 0) + 1; setStanding(c); }
     // Паспорт: штамп страны собеседника
     for (const [c, o] of [[a, b], [b, a]]) {
       if (o.country && db.stamp(c.id, o.country, now)) {
@@ -302,7 +312,7 @@ const admin = createAdmin({
     if (!c) return;
     const u = db.user(id);
     c.premium = db.isPremium(u);
-    c.tier = auraOf(u).tier;
+    setStanding(c, u);
     c.send({ t: 'me', me: profileOf(c) });
   },
   refund: async chargeId => {
@@ -525,12 +535,14 @@ wss.on('connection', (ws, req) => {
       id: user.id, name: user.name || '', username: user.username || '',
       gender: u.gender, want: u.want, langs: normalizeLangs(u.langs, user.lang),
       premium: db.isPremium(u), room, tier: auraOf(u).tier, vibe: null, rateTarget: null,
+      matches: db.matchCount(user.id),
       reveal: Boolean(u.reveal), country: /^[A-Z]{2}$/.test(country) && !['XX', 'T1'].includes(country) ? country
         : cfg.devAnon && /^[A-Z]{2}$/.test(msg.devCountry || '') ? msg.devCountry : '',
       minorHist: [],
       send, close: reason => ws.close(4005, reason),
     };
     if (!client.premium && !db.filterLeft(client.id, today(), cfg.freeFilterPerDay)) client.want = 'any';
+    setStanding(client, u);
     clients.set(user.id, client);
     if (client.country) db.setCountry(client.id, client.country);
     if (sp.startsWith('duo_')) setTimeout(() => clients.get(client.id) === client && onDuo({ t: 'duo_join', code: sp.slice(4) }), 0);
@@ -631,7 +643,7 @@ wss.on('connection', (ws, req) => {
     if (!t || Date.now() > t.until) return;
     if (db.rate(client.id, t.id, msg.v > 0 ? 1 : -1)) {
       const target = clients.get(t.id);
-      if (target) target.tier = auraOf(db.user(t.id)).tier;
+      if (target) setStanding(target);
     }
     send({ t: 'rated' });
   }

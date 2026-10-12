@@ -9,7 +9,8 @@ import { shareLang } from './langs.js';
 const wants = (a, b) => a.want === 'any' || a.want === b.gender;
 
 export class Matchmaker {
-  constructor({ rematchAfterMs = 10_000, tierRelaxMs = 15_000, onPair = () => {}, onUnpair = () => {}, peerInfo = null } = {}) {
+  constructor({ rematchAfterMs = 10_000, tierRelaxMs = 15_000, newbieRelaxMs = 40_000, onPair = () => {}, onUnpair = () => {}, peerInfo = null } = {}) {
+    this.newbieRelaxMs = newbieRelaxMs;
     // peerInfo(self, other, common) → что клиент self узнаёт о собеседнике (сервер прячет страну на время игры «Угадай»)
     this.peerInfo = peerInfo;
     this.rematchAfterMs = rematchAfterMs;
@@ -32,19 +33,28 @@ export class Matchmaker {
     if (!wants(a, b) || !wants(b, a)) return false;
     const both = ms => this.waited(a, now) >= ms && this.waited(b, now) >= ms;
     if ((a.tier || 'ok') !== (b.tier || 'ok') && !both(this.tierRelaxMs)) return false;
+    // Новичка не сводим с людьми с плохой репутацией — первое впечатление решает, вернётся ли он
+    if (((a.newbie && b.tier === 'low') || (b.newbie && a.tier === 'low')) && !both(this.newbieRelaxMs)) return false;
     // Режим «Сначала голос» — сводим одинаковых, смешиваем только если оба долго ждут
     if (Boolean(a.reveal) !== Boolean(b.reveal) && !both(this.tierRelaxMs)) return false;
     const recent = this.lastPeer.get(a.id) === b.id || this.lastPeer.get(b.id) === a.id;
     return !recent || both(this.rematchAfterMs);
   }
 
-  // Кандидат для client: сначала премиум, внутри — кто дольше ждёт
+  // Кандидат для client: Premium вперёд; новичку — лучший собеседник (высокая аура, не новичок);
+  // при равенстве — кто дольше ждёт (очередь FIFO)
+  score(client, o) {
+    let s = o.premium ? 100 : 0;
+    if (client.newbie) s += (o.good ? 50 : 0) + (o.newbie ? 0 : 20);
+    if (o.newbie && client.good) s += 10;
+    return s;
+  }
   pick(client, now, from = this.waiting) {
-    let best = null;
+    let best = null, bestScore = -1;
     for (const o of from) {
       if (!this.canPair(client, o, now)) continue;
-      if (!best || (o.premium && !best.premium)) best = o;
-      if (best.premium) break;
+      const sc = this.score(client, o);
+      if (sc > bestScore) { best = o; bestScore = sc; }
     }
     return best;
   }

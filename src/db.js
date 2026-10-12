@@ -112,6 +112,7 @@ export class Db {
   }
 
   exists(id) { return Boolean(this.db.prepare('SELECT 1 FROM users WHERE id = ?').get(id)); }
+  matchCount(id) { return this.db.prepare("SELECT COUNT(*) AS n FROM events WHERE type = 'match' AND user_id = ?").get(id).n; }
 
   user(id, now = Date.now()) {
     this.db.prepare('INSERT OR IGNORE INTO users (id, created_at) VALUES (?, ?)').run(id, now);

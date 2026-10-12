@@ -1749,17 +1749,43 @@
   $('consent').checked = store.get('consent') === '1';
   $('consent').onchange = updateStart;
 
+  // Перед системным запросом камеры — короткое объяснение: так больше людей нажимают «Разрешить»
+  async function cameraGranted() {
+    try { return (await navigator.permissions?.query({ name: 'camera' }))?.state === 'granted'; } catch { return false; }
+  }
   $('start').onclick = async () => {
+    if (!store.get('camPrimed') && !(await cameraGranted())) {
+      $('cam-mask').checked = maskOn;
+      openSheet('sheet-cam');
+      return;
+    }
+    begin();
+  };
+  $('cam-allow').onclick = () => {
+    store.set('camPrimed', '1');
+    if ($('cam-mask').checked !== maskOn) { store.set('maskDefault', $('cam-mask').checked ? '1' : '0'); maskOn = $('cam-mask').checked; renderMaskDefault(); }
+    closeSheet();
+    begin();
+  };
+  $('camd-retry').onclick = () => { closeSheet(); begin(); };
+  function camDeniedHelp() {
+    const p = tg?.platform || '';
+    return t(p === 'ios' ? 'camd_ios' : p === 'android' || p === 'android_x' ? 'camd_android' : 'camd_other');
+  }
+  async function begin() {
     $('start').disabled = true;
     try {
       await startCamera();
     } catch {
       $('cam-error').hidden = false;
       $('cam-error').textContent = t('cam_error');
+      $('camd-text').textContent = camDeniedHelp();
+      openSheet('sheet-cam-denied');
       updateStart();
       haptic('error');
       return;
     }
+    $('cam-error').hidden = true;
     store.set('consent', '1');
     send({ t: 'profile', gender: me.gender, langs: myLangs });
     showScreen('chat');

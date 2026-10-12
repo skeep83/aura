@@ -570,3 +570,12 @@ a { color: var(--accent); text-decoration: none; font-weight: 600; }
 #chat.swapped .stage > #local.dragging { transition: none; }
 #chat.swapped .pip #remote { position: static; transition: filter .8s var(--ease); }
 #chat.swapped .pip #remote.veil { filter: blur(10px) brightness(.85); }
+
+/* Экран перед запросом камеры */
+.cam-badge { background: var(--grad); box-shadow: var(--glow); }
+.cam-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; width: 100%; text-align: left; }
+.cam-list li { display: flex; gap: 12px; align-items: center; padding: 12px 14px; border-radius: 18px; background: var(--card); box-shadow: var(--shadow-sm);
+  font-size: 14px; font-weight: 600; color: var(--title); }
+.cam-list i { font-style: normal; font-size: 20px; flex: none; }
+.cam-mask { display: flex; align-items: center; gap: 10px; font-size: 14px; font-weight: 600; color: var(--text); cursor: pointer; }
+.cam-mask input { width: 20px; height: 20px; accent-color: #4a86f7; }
