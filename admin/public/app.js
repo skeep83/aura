@@ -263,6 +263,7 @@
           ${u.online ? '<button class="btn ghost sm" data-act="kick">Отключить сейчас</button>' : ''}
           ${u.reports ? '<button class="btn ghost sm" data-act="clear_reports">Сбросить жалобы</button>' : ''}
           <button class="btn ghost sm" data-act="ai_review">✨ ИИ-разбор</button>
+          <button class="btn ghost sm" data-act="jev_risk">⚖️ Jev: риск</button>
         </div>
         <div id="ai-review"></div>
         <div class="act-row"><span class="muted small">Premium:</span>
@@ -320,6 +321,7 @@
     } else if (b.dataset.act === 'unban') act('unban');
     else if (b.dataset.act === 'kick') act('kick', {}, `Отключить ${name} от текущего разговора?`);
     else if (b.dataset.act === 'ai_review') aiReview(current.user.id, b);
+    else if (b.dataset.act === 'jev_risk') jevRisk(current.user.id, b);
     else if (b.dataset.act === 'clear_reports') act('clear_reports', {}, 'Удалить все жалобы на этого пользователя?');
   };
 
@@ -451,6 +453,7 @@
   // ---------- ИИ ----------
   let aiCfg = null;
   async function loadAI() {
+    loadJev().catch(e => toast('Jev: ' + e.message, true));
     aiCfg = await api('ai');
     const c = aiCfg;
     $('ai-enabled').checked = c.enabled;
@@ -514,17 +517,67 @@
   $('ai-ask').onsubmit = e => { e.preventDefault(); const q = $('ai-question').value.trim(); $('ai-question').value = ''; askAI(q); };
   $('ai-suggest').onclick = e => { const q = e.target.closest('[data-q]')?.dataset.q; if (q) askAI(q); };
 
+  // ---------- Jev (TypeSafe AI) ----------
+  async function loadJev() {
+    const c = await api('jev');
+    $('jev-enabled').checked = c.enabled;
+    $('jev-enabled-label').textContent = c.enabled ? 'Включён' : 'Выключен';
+    $('jev-base').value = c.baseUrl; $('jev-model').value = c.model; $('jev-key').value = '';
+    $('jev-key-state').textContent = c.keySet ? `Ключ сохранён (${c.keyHint}). Хранится только на сервере.` : 'Ключ не задан.';
+    $('jev-threshold').value = c.chatThreshold; $('jev-limit').value = c.dailyLimit;
+    $('jev-features').innerHTML = Object.entries(c.featureNames).map(([k, label]) =>
+      `<label><input type="checkbox" data-f="${esc(k)}"${c.features[k] !== false ? ' checked' : ''}><span>${esc(label)}</span></label>`).join('');
+    const u = c.usage;
+    $('jev-usage').innerHTML = [['Запросов сегодня', `${fmt(u.requests)} из ${fmt(c.dailyLimit)}`], ['Токенов на входе', fmt(u.tokensIn)], ['Ошибок', fmt(u.errors)],
+      ...Object.entries(u.byFeature || {}).map(([k, n]) => [`· ${k}`, fmt(n)]), ['Последняя ошибка', esc(u.lastError || '—')]]
+      .map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join('');
+  }
+  $('jev-enabled').onchange = () => { $('jev-enabled-label').textContent = $('jev-enabled').checked ? 'Включён' : 'Выключен'; };
+  $('jev-form').onsubmit = async e => {
+    e.preventDefault();
+    const features = Object.fromEntries([...document.querySelectorAll('#jev-features [data-f]')].map(i => [i.dataset.f, i.checked]));
+    try {
+      await api('jev', { method: 'POST', body: { enabled: $('jev-enabled').checked, baseUrl: $('jev-base').value.trim(), model: $('jev-model').value.trim(),
+        apiKey: $('jev-key').value, chatThreshold: Number($('jev-threshold').value), dailyLimit: Number($('jev-limit').value), features } });
+      toast('Настройки Jev сохранены'); loadJev();
+    } catch (err) { toast('Не сохранилось: ' + err.message, true); }
+  };
+  $('jev-test').onclick = async () => {
+    $('jev-test-result').textContent = 'Проверяем…';
+    try { const r = await api('jev/test', { method: 'POST', body: {} }); $('jev-test-result').textContent = `✅ Работает: ${r.model}, «дружелюбно» = ${Math.round((r.friendly ?? 0) * 100)}%, ${r.ms} мс`; }
+    catch (err) { $('jev-test-result').textContent = '❌ ' + err.message; }
+    loadJev();
+  };
+  $('jev-clear-key').onclick = async () => {
+    if (!confirm('Удалить ключ Jev? Модерация и разбор жалоб через Jev отключатся.')) return;
+    await api('jev', { method: 'POST', body: { clearKey: true, enabled: false } }); toast('Ключ удалён'); loadJev();
+  };
+  async function jevRisk(id, btn) {
+    const box = $('ai-review');
+    btn.disabled = true; box.className = 'ai-review'; box.textContent = 'Jev оценивает риск…';
+    try {
+      const r = await api(`jev/user/${encodeURIComponent(id)}`, { method: 'POST', body: {} });
+      const levels = ['нет', 'низкий', 'средний', 'высокий', 'очень высокий'];
+      const risk = r.risk;
+      box.textContent = risk ? `Риск: ${levels[Math.round(risk.score)] || risk.score} (уверенность ${Math.round((risk.confidence ?? 0) * 100)}%)` +
+        (r.bot !== null ? `\nПохож на бота/спамера: ${Math.round(r.bot * 100)}%` : '') : 'Нет ответа';
+    } catch (e) { box.textContent = e.message === 'jev_off' ? 'Jev выключен — включите его в разделе «ИИ».' : 'Не получилось: ' + e.message; }
+    btn.disabled = false;
+  }
+
   // ---------- Жалобы ----------
   const REASONS = { nudity: '🔞 18+', minor: '🧒 Несовершеннолетний', abuse: '🤬 Оскорбления', spam: '📢 Спам', other: 'Другое' };
   async function loadReports() {
     const d = await api('reports');
     $('report-reasons').innerHTML = d.byReason.map(r => `<span class="tag">${REASONS[r.reason] || esc(r.reason)} · ${r.n}</span>`).join('');
-    $('reports-table').innerHTML = `<thead><tr><th>На кого</th><th>Причина</th><th class="num">Всего жалоб</th><th>Статус</th><th>От кого</th><th>Когда</th></tr></thead><tbody>${
+    const JEV = { ignore: '🟢 оставить', warn: '🟡 предупредить', ban_24h: '🟠 бан 24 ч', ban_7d: '🔴 бан 7 дн' };
+    $('reports-table').innerHTML = `<thead><tr><th>На кого</th><th>Причина</th><th class="num">Всего жалоб</th><th>Jev советует</th><th>Статус</th><th>От кого</th><th>Когда</th></tr></thead><tbody>${
       d.reports.map(r => `<tr class="click" data-id="${esc(r.target)}">
         <td><div class="who"><span class="ava">${esc((r.targetName || '?').slice(0, 1).toUpperCase())}</span><div><b>${esc(r.targetName || '—')}</b><small>${r.targetUsername ? '@' + esc(r.targetUsername) : esc(r.target)}</small></div></div></td>
         <td>${REASONS[r.reason] || esc(r.reason)}</td><td class="num">${r.targetReports}</td>
+        <td>${r.jevAction ? `${JEV[r.jevAction] || esc(r.jevAction)} <small class="muted">${Math.round(r.jevConfidence * 100)}%</small>` : '<span class="muted">—</span>'}</td>
         <td>${r.targetBannedUntil > Date.now() ? '<span class="tag bad">в бане</span>' : '<span class="tag">активен</span>'}</td>
-        <td class="muted">${esc(r.reporter)}</td><td class="muted">${date(r.at)}</td></tr>`).join('') || '<tr><td colspan="6" class="empty">Жалоб нет 🎉</td></tr>'}</tbody>`;
+        <td class="muted">${esc(r.reporter)}</td><td class="muted">${date(r.at)}</td></tr>`).join('') || '<tr><td colspan="7" class="empty">Жалоб нет 🎉</td></tr>'}</tbody>`;
   }
 
   // ---------- Платежи ----------
@@ -549,7 +602,7 @@
   };
 
   // ---------- Модерация ----------
-  const MOD = { nsfw: '🔞 NSFW', age_block: '🧒 Возраст', report: '⚑ Жалоба', admin_ban: '⛔ Бан админом', admin_unban: '✅ Разбан' };
+  const MOD = { nsfw: '🔞 NSFW', age_block: '🧒 Возраст', report: '⚑ Жалоба', admin_ban: '⛔ Бан админом', admin_unban: '✅ Разбан', jev_autoban: '⚖️ Автобан Jev', chat_block: '💬 Блок в чате' };
   async function loadModeration() {
     const d = await api('moderation');
     $('mod-events').innerHTML = `<thead><tr><th>Событие</th><th>Кто</th><th>Детали</th><th>Когда</th></tr></thead><tbody>${

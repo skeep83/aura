@@ -19,6 +19,8 @@ else
   OLD=$(git rev-parse HEAD)
   NEW=$(git rev-parse origin/main)
   if [[ "$OLD" == "$NEW" && "${1:-}" != "--force" ]]; then exit 0; fi
+  # Версия, которая уже провалила проверку и была откачена, повторно не ставится (ждём следующего коммита)
+  if [[ "${1:-}" != "--force" && -f .failed-commit && "$(cat .failed-commit)" == "$NEW" ]]; then exit 0; fi
   git -c advice.detachedHead=false checkout -q "$NEW"
   # Перезапуск уже обновлённым update.sh — иначе изменения самого скрипта применились бы только в следующий раз
   exec 9>&-
@@ -58,9 +60,11 @@ healthy() {
 log "обновление ${OLD:0:7} → ${NEW:0:7}"
 deploy
 if healthy; then
+  rm -f .failed-commit
   log "ok ${NEW:0:7}: $(git log -1 --format=%s)"
 else
   log "ПРОВАЛ ${NEW:0:7} — откат на ${OLD:0:7}"
+  echo "$NEW" > .failed-commit
   git -c advice.detachedHead=false checkout -q "$OLD"
   deploy
   healthy && log "откат выполнен" || log "откат тоже не поднялся — смотрите docker compose logs"

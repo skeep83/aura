@@ -425,3 +425,59 @@ test('модерация: без кадров камеры разговор пр
   clearInterval(timer);
   ok.ws.close(); silent.ws.close();
 });
+
+test('Jev: модерация чата вероятностями, разбор жалоб и автобан', async t => {
+  // Имитация TypeSafe /v1/systemone
+  const calls = [];
+  const mock = http.createServer((req, res) => {
+    let b = ''; req.on('data', c => { b += c; }); req.on('end', () => {
+      const body = JSON.parse(b);
+      calls.push({ auth: req.headers.authorization, body });
+      const answers = {};
+      for (const [id, q] of Object.entries(body.questions)) {
+        if (q.type === 'noul') answers[id] = { type: 'noul', noul: id === 'scam' && /crypto/i.test(body.state) ? 0.97 : 0.02 };
+        if (q.type === 'choice') answers[id] = { type: 'choice', choice: 'ban_24h', confidence: 0.95, probabilities: { ban_24h: 0.95, warn: 0.05 } };
+        if (q.type === 'score') answers[id] = { type: 'score', score: 3, confidence: 0.8, probabilities: { 3: 0.8 } };
+      }
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ model: 'jev-test', answers, usage: { input_tokens: 10, output_tokens: 0 } }));
+    });
+  });
+  mock.listen(0); await once(mock, 'listening'); t.after(() => mock.close());
+
+  const port = await startServer(t, { ADMIN_API_TOKEN: 'adm-secret-token-0123456789' });
+  const admin = (p, body) => fetch(`http://127.0.0.1:${port}/api/admin/${p}`, {
+    method: body ? 'POST' : 'GET', headers: { authorization: 'Bearer adm-secret-token-0123456789', 'content-type': 'application/json' },
+    body: body && JSON.stringify(body),
+  }).then(r => r.json());
+  const cfg = await admin('jev', { enabled: true, baseUrl: `http://127.0.0.1:${mock.address().port}`, apiKey: 'ts-test-key-9999',
+    features: { chatModeration: true, reportTriage: true, autoBan: true, riskScore: true } });
+  assert.deepEqual([cfg.enabled, cfg.keySet, cfg.keyHint, 'apiKey' in cfg], [true, true, '…9999', false]);
+  assert.equal((await admin('jev/test', {})).ok, true);
+
+  const a = await client(port, 'dev-jev-a'), b = await client(port, 'dev-jev-b');
+  a.send({ t: 'find' }); b.send({ t: 'find' });
+  await a.next('matched'); await b.next('matched');
+  a.send({ t: 'chat', text: 'invest in my crypto fund, 300% guaranteed' });
+  const blocked = await a.next('chat_blocked');
+  assert.equal(blocked.reason, 'severe');
+  assert.equal(calls.at(-1).auth, 'Bearer ts-test-key-9999');
+
+  // Две жалобы от разных людей → Jev «бан 24 ч» на 95% → автобан
+  b.send({ t: 'report', reason: 'spam' });
+  await b.next('reported');
+  b.ws.close(); // чтобы a встретился именно с c
+  const c = await client(port, 'dev-jev-c');
+  await sleep(900);
+  a.send({ t: 'find' }); c.send({ t: 'find' });
+  await c.next('matched');
+  c.send({ t: 'report', reason: 'abuse' });
+  await c.next('reported');
+  const ban = await until(a, 'banned', () => true);
+  assert.ok(ban.until > Date.now());
+  const user = await admin('users/dev-jev-a');
+  assert.equal(user.user.banReason, 'jev:ban_24h');
+  const risk = await admin('jev/user/dev-jev-a', {});
+  assert.equal(risk.risk.score, 3);
+  c.ws.close();
+});

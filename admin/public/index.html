@@ -167,6 +167,29 @@
             <table class="kv" id="ai-usage"></table>
           </div>
         </div>
+              <form class="card ai-form" id="jev-form" autocomplete="off" style="margin-top:16px">
+          <div class="card-head"><h3>Jev · TypeSafe AI — модель решений</h3><label class="switch"><input type="checkbox" id="jev-enabled"><span></span><b id="jev-enabled-label">Выключен</b></label></div>
+          <p class="muted small">Отвечает не текстом, а вероятностями на типизированные вопросы (да/нет, выбор, шкала). Дёшево и быстро — идеально для модерации и решений. Ключ: docs.typesafe.ai (ранний доступ) или совместимый шлюз.</p>
+          <div class="grid2" style="margin-top:0">
+            <label>Адрес API<input id="jev-base" placeholder="https://api.typesafe.ai"></label>
+            <label>Модель<input id="jev-model" placeholder="jev-latest"></label>
+          </div>
+          <label>API-ключ<input id="jev-key" type="password" placeholder="не меняется, если оставить пустым" autocomplete="new-password"></label>
+          <p class="muted small" id="jev-key-state"></p>
+          <div class="grid2" style="margin-top:0">
+            <label>Порог модерации чата (0.5–0.99)<input id="jev-threshold" type="number" min="0.5" max="0.99" step="0.01"></label>
+            <label>Лимит запросов в сутки<input id="jev-limit" type="number" min="10" step="10"></label>
+          </div>
+          <h3 style="margin-top:8px">Что делает Jev</h3>
+          <div id="jev-features" class="checks"></div>
+          <div class="actions">
+            <button class="btn primary" type="submit">Сохранить</button>
+            <button class="btn ghost" type="button" id="jev-test">Проверить связь</button>
+            <button class="btn danger sm" type="button" id="jev-clear-key">Удалить ключ</button>
+          </div>
+          <p class="muted small" id="jev-test-result"></p>
+          <table class="kv" id="jev-usage"></table>
+        </form>
       </section>
 
       <section class="page" id="page-system" hidden>

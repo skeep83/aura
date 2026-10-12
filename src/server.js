@@ -17,6 +17,7 @@ import { DuoManager } from './duo.js';
 import { createAdmin } from './admin.js';
 import { ChatFilter } from './chatfilter.js';
 import { createAI } from './ai.js';
+import { createJev } from './jev.js';
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const PUBLIC_DIR = path.join(ROOT, 'public');
@@ -81,6 +82,7 @@ const moderation = new Moderation({
 });
 const chatFilter = new ChatFilter();
 const ai = createAI({ db });
+const jev = createJev({ db });
 const FRAME_GRACE_MS = Number(env.FRAME_GRACE_MS || 25_000);  // после начала разговора кадры обязательны
 const FRAME_MAX_GAP_MS = Number(env.FRAME_MAX_GAP_MS || 20_000); // дольше без кадра — разговор прерывается (модифицированный клиент или камера выключена)
 const schedule = new EventSchedule({
@@ -287,7 +289,7 @@ function kick(id, banned = true) {
 
 // Админ-API для панели на TrueNAS (/api/admin/*, Bearer ADMIN_API_TOKEN)
 const admin = createAdmin({
-  db, ai, appLink, botUsername: () => cfg.botUsername || bot_?.username || '', token: env.ADMIN_API_TOKEN || '',
+  db, ai, jev, appLink, botUsername: () => cfg.botUsername || bot_?.username || '', token: env.ADMIN_API_TOKEN || '',
   cfg: {
     ...cfg, moderationUrl: env.MODERATION_URL || '', nsfwThreshold: Number(env.NSFW_THRESHOLD || 0.85),
     minorThreshold: Number(env.MINOR_THRESHOLD || 0.8),
@@ -318,6 +320,32 @@ function sourceOf(sp, room) {
   if (sp.startsWith('duo_')) return 'duo';
   if (sp.startsWith('_tgr_')) return 'affiliate';
   return 'direct';
+}
+
+// Jev разбирает жалобу: рекомендация для админки, при уверенности ≥ 90% и повторных жалобах — автобан (если включён)
+const BAN_HOURS = { ban_24h: 24, ban_7d: 168 };
+async function triageReport(targetId, reason) {
+  if (!jev.on('reportTriage')) return;
+  try {
+    const d = admin.userDetail(targetId);
+    if (!d) return;
+    const u = d.user;
+    const state = JSON.stringify({
+      newReport: reason, reportsAgainst: d.reportsAgainst.map(r => r.reason), aura: u.aura, karmaUp: u.karmaUp, karmaDown: u.karmaDown,
+      nsfwStrikes: u.strikes, accountAgeDays: Math.round((Date.now() - u.createdAt) / DAY), premium: u.premiumUntil > Date.now(),
+      recentEvents: d.events.filter(e => ['nsfw', 'age_block', 'chat_block', 'no_frames', 'report'].includes(e.type)).slice(0, 20).map(e => e.type),
+      chatsLast7d: d.wrapped.chats,
+    });
+    const r = await jev.triageReport(state);
+    if (!r) return;
+    db.event('jev_triage', targetId, r.confidence, r.action);
+    console.log(`jev triage ${targetId}: ${r.action} (${Math.round(r.confidence * 100)}%)`);
+    if (jev.on('autoBan') && BAN_HOURS[r.action] && r.confidence >= 0.9 && d.reportsAgainst.length >= 2) {
+      db.ban(targetId, BAN_HOURS[r.action] * HOUR, `jev:${r.action}`);
+      db.event('jev_autoban', targetId, r.confidence, r.action);
+      kick(targetId);
+    }
+  } catch (e) { console.error('jev triage:', e.message); }
 }
 
 // Бывший собеседник автоматически ищет дальше
@@ -618,7 +646,7 @@ wss.on('connection', (ws, req) => {
       db.ban(client.id, 24 * HOUR, 'chat');
       return kick(client.id);
     }
-    send({ t: 'chat_blocked', reason: reason.startsWith('ai:') ? 'severe' : reason, strikes: client.chatStrikes.length, max: 3 });
+    send({ t: 'chat_blocked', reason: /^(ai|jev):/.test(reason) ? 'severe' : reason, strikes: client.chatStrikes.length, max: 3 });
   }
 
   // Комплимент после разговора: анонимно, один в сутки на пару, заодно +aura
@@ -777,7 +805,9 @@ wss.on('connection', (ws, req) => {
         }
         if (inDuo) duos.broadcast(client, { t: 'chat', text: r.text });
         else peer.send({ t: 'chat', text: r.text });
-        ai.moderateChat(text, client.id).then(v => { if (v && clients.get(client.id) === client) onChatViolation(`ai:${v}`, text); }).catch(() => {});
+        // Второй слой модерации: Jev (дешёвая модель решений), иначе ИИ-провайдер
+        const second = jev.on('chatModeration') ? ['jev', jev.moderateChat(text)] : ['ai', ai.moderateChat(text, client.id)];
+        second[1].then(v => { if (v && clients.get(client.id) === client) onChatViolation(`${second[0]}:${v}`, text); }).catch(() => {});
         break;
       }
       case 'game': {
@@ -820,6 +850,7 @@ wss.on('connection', (ws, req) => {
         if (until) kick(peer.id); else requeue(peer);
         send({ t: 'reported' });
         mm.enqueue(client);
+        if (!until) triageReport(peer.id, reason);
         break;
       }
       case 'invoice':

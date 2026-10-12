@@ -6,7 +6,7 @@ const DAY = 24 * 60 * 60 * 1000;
 const HOUR = 60 * 60 * 1000;
 const FOREVER = 8.64e15;
 
-export function createAdmin({ db, ai, appLink = () => '', botUsername = () => '', cfg, token, live, isOnline, kick, refresh, refund, notify, startedAt = Date.now() }) {
+export function createAdmin({ db, ai, jev, appLink = () => '', botUsername = () => '', cfg, token, live, isOnline, kick, refresh, refund, notify, startedAt = Date.now() }) {
   const sql = db.db;
   const all = (q, ...a) => sql.prepare(q).all(...a);
   const get = (q, ...a) => sql.prepare(q).get(...a);
@@ -161,7 +161,9 @@ export function createAdmin({ db, ai, appLink = () => '', botUsername = () => ''
   function reports({ limit = 100 }) {
     const rows = all(`SELECT r.target, r.reporter, r.reason, r.at,
         t.name AS targetName, t.username AS targetUsername, t.banned_until AS targetBannedUntil,
-        (SELECT COUNT(*) FROM reports x WHERE x.target = r.target) AS targetReports
+        (SELECT COUNT(*) FROM reports x WHERE x.target = r.target) AS targetReports,
+        (SELECT tag FROM events e WHERE e.type = 'jev_triage' AND e.user_id = r.target ORDER BY e.at DESC LIMIT 1) AS jevAction,
+        (SELECT value FROM events e WHERE e.type = 'jev_triage' AND e.user_id = r.target ORDER BY e.at DESC LIMIT 1) AS jevConfidence
       FROM reports r LEFT JOIN users t ON t.id = r.target ORDER BY r.at DESC LIMIT ?`, Math.min(500, Number(limit) || 100));
     const byReason = all('SELECT reason, COUNT(*) AS n FROM reports GROUP BY reason ORDER BY n DESC');
     return { reports: rows, byReason };
@@ -178,7 +180,7 @@ export function createAdmin({ db, ai, appLink = () => '', botUsername = () => ''
   function moderation({ limit = 150 }) {
     const events = all(`SELECT e.type, e.user_id AS userId, e.value, e.tag, e.at, u.name, u.username, u.banned_until AS bannedUntil
       FROM events e LEFT JOIN users u ON u.id = e.user_id
-      WHERE e.type IN ('nsfw','age_block','report','admin_ban','admin_unban') ORDER BY e.at DESC LIMIT ?`, Math.min(500, Number(limit) || 150));
+      WHERE e.type IN ('nsfw','age_block','report','admin_ban','admin_unban','jev_autoban','chat_block') ORDER BY e.at DESC LIMIT ?`, Math.min(500, Number(limit) || 150));
     const banned = all('SELECT id, name, username, banned_until AS bannedUntil, ban_reason AS reason FROM users WHERE banned_until > ? ORDER BY banned_until DESC LIMIT 200', Date.now());
     return { events, banned };
   }
@@ -248,6 +250,7 @@ export function createAdmin({ db, ai, appLink = () => '', botUsername = () => ''
           case 'rooms': return send(200, rooms()), true;
           case 'config': return send(200, config()), true;
           case 'ai': return send(200, ai.publicConfig()), true;
+          case 'jev': return send(200, jev.publicConfig()), true;
           case 'sources': {
             const days = Math.max(1, Math.min(365, Number(qs.days) || 30));
             const bot = botUsername();
@@ -260,6 +263,31 @@ export function createAdmin({ db, ai, appLink = () => '', botUsername = () => ''
           const r = act(parts[1], parts[2], body);
           console.log(`admin: ${parts[2]} ${parts[1]}${r.error ? ' → ' + r.error : ''}`);
           return send(r.error ? 400 : 200, r), true;
+        }
+        if (parts[0] === 'jev') {
+          if (!parts[1]) {
+            const next = {};
+            for (const k of ['enabled', 'baseUrl', 'model', 'features']) if (k in body) next[k] = body[k];
+            if ('chatThreshold' in body) next.chatThreshold = Math.max(0.5, Math.min(0.99, Number(body.chatThreshold) || 0.85));
+            if ('dailyLimit' in body) next.dailyLimit = Math.max(10, Math.min(1_000_000, Number(body.dailyLimit) || 20000));
+            if (typeof body.apiKey === 'string' && body.apiKey.trim()) next.apiKey = body.apiKey.trim();
+            if (body.clearKey) next.apiKey = '';
+            jev.save(next);
+            db.event('admin_jev_config', '', 0, jev.config.model);
+            return send(200, jev.publicConfig()), true;
+          }
+          try {
+            if (parts[1] === 'test') return send(200, await jev.test()), true;
+            if (parts[1] === 'user' && parts[2]) {
+              const d = userDetail(parts[2]);
+              if (!d) return send(404, { error: 'not_found' }), true;
+              const u = d.user;
+              const state = JSON.stringify({ reportsAgainst: d.reportsAgainst.map(r => r.reason), aura: u.aura, karmaUp: u.karmaUp, karmaDown: u.karmaDown,
+                nsfwStrikes: u.strikes, banned: u.bannedUntil > Date.now(), banReason: u.banReason, accountAgeDays: Math.round((Date.now() - u.createdAt) / DAY),
+                chatsLast7d: d.wrapped.chats, events: d.events.slice(0, 40).map(e => e.type), payments: d.payments.length });
+              return send(200, await jev.riskScore(state)), true;
+            }
+          } catch (e) { return send(400, { error: e.message }), true; }
         }
         if (parts[0] === 'ai') {
           if (!parts[1]) {
