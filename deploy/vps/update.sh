@@ -4,6 +4,7 @@
 #   bash deploy/vps/update.sh --force  — пересобрать текущую версию
 set -euo pipefail
 cd "$(dirname "$0")/../.."
+umask 022 # статика должна читаться nginx (не root) — не наследовать строгий umask вызывающего
 exec 9>/run/aura-update.lock
 flock -n 9 || exit 0
 
@@ -16,11 +17,14 @@ NEW=$(git rev-parse origin/main)
 if [[ "$OLD" == "$NEW" && "${1:-}" != "--force" ]]; then exit 0; fi
 
 # Статика с версией ресурсов (?v=…), чтобы телефоны не смешивали новый index.html со старым app.js
+# Контейнер web смонтирован на .build целиком, поэтому замена .build/html переименованием видна ему сразу.
 build_web() {
-  rm -rf .build/public.new && mkdir -p .build && cp -R public .build/public.new
-  sed -i -E "s/\?v=[0-9]+/?v=$(git rev-parse --short HEAD)/g" .build/public.new/index.html
-  rm -rf .build/public.old && { [[ -d .build/public ]] && mv .build/public .build/public.old || true; }
-  mv .build/public.new .build/public
+  mkdir -p .build && rm -rf .build/html.new .build/html.old && cp -R public .build/html.new
+  sed -i -E "s/\?v=[0-9a-f]+/?v=$(git rev-parse --short HEAD)/g" .build/html.new/index.html
+  chmod -R a+rX .build/html.new
+  [[ -d .build/html ]] && mv .build/html .build/html.old
+  mv .build/html.new .build/html
+  rm -rf .build/html.old .build/public
 }
 
 deploy() {
@@ -33,7 +37,8 @@ deploy() {
 healthy() {
   for _ in $(seq 1 30); do
     sleep 3
-    docker exec "$("${COMPOSE[@]}" ps -q api)" wget -qO- http://127.0.0.1:8080/healthz 2>/dev/null | grep -q '"ok":true' && return 0
+    docker exec "$("${COMPOSE[@]}" ps -q api)" wget -qO- http://127.0.0.1:8080/healthz 2>/dev/null | grep -q '"ok":true' \
+      && docker exec "$("${COMPOSE[@]}" ps -q web)" wget -qO- http://127.0.0.1/ 2>/dev/null | grep -q 'app.js' && return 0
   done
   return 1
 }
