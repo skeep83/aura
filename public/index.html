@@ -228,6 +228,7 @@
       <div class="banner lg" id="room-chip" hidden></div>
       <div class="banner lg" id="duo-chip" hidden></div>
       <div class="banner lg live-chip" id="live-chip" hidden></div>
+      <div class="banner lg ex-chip" id="ex-chip" hidden></div>
     </div>
 
     <div class="rail" id="rail">
@@ -298,6 +299,18 @@
     <div class="field">
       <div class="label" data-i="langs_short">Языки общения</div>
       <div class="chips" id="lang-chips-2"></div>
+    </div>
+    <div class="field">
+      <div class="label" data-i="ex_label">Языковой обмен</div>
+      <div class="seg" id="ex-seg">
+        <button data-v="0" data-i="ex_off">Выкл.</button>
+        <button data-v="1" data-i="ex_on">Вкл.</button>
+      </div>
+      <div class="ex-pickers" id="ex-pickers" hidden>
+        <label><span data-i="ex_native">Мой язык</span><select id="ex-native"></select></label>
+        <label><span data-i="ex_learn">Учу</span><select id="ex-learn"></select></label>
+      </div>
+      <p class="hint" data-i="ex_hint">Подберём того, кто учит ваш язык и говорит на том, что учите вы. Половина разговора — на одном языке, половина — на другом</p>
     </div>
     <div class="field">
       <div class="label" data-i="i_am">Я —</div>

@@ -229,6 +229,7 @@
     peerInfo = null;
     matchedAt = 0;
     setSwap(false);
+    stopExchange();
     stopReveal();
     stopGuess();
     $('moment-ask').hidden = true;
@@ -267,6 +268,7 @@
         if (reveal) startReveal(peer);
         else setTimeout(() => el.remote.classList.remove('veil'), 1500); // первые секунды размыто — как в Azar
         if (peer?.guess) startGuess(peer.guess);
+        if (peer?.exchange) startExchange(peer.exchange);
         haptic('medium');
         const who = peer?.gender === 'f' ? t('peer_f') : peer?.gender === 'm' ? t('peer_m') : '';
         const lang = (peer?.langs || []).map(l => LANG_META[l]?.[0]).filter(Boolean).join(' ');
@@ -579,6 +581,7 @@
     for (const b of $('mode-seg').children) b.classList.toggle('on', b.dataset.v === (me.reveal ? 'voice' : 'video'));
     for (const b of $('notify-seg').children) b.classList.toggle('on', b.dataset.v === (me.notifyEvents ? '1' : '0'));
     if (me.langs?.length) { myLangs = me.langs; renderLangs(); }
+    renderExchange();
     $('premium-status').textContent = me.premium
       ? t('premium_until', { date: new Date(me.premiumUntil).toLocaleDateString(LOCALE, { day: 'numeric', month: 'long' }) })
       : t('premium_sub');
@@ -1484,6 +1487,67 @@
         break;
     }
   }
+
+  // ---------- Языковой обмен ----------
+  const langLabel = l => `${LANG_META[l]?.[0] || ''} ${LANG_META[l]?.[1] || l}`;
+  function renderExchange() {
+    const ex = me.exchange;
+    for (const b of $('ex-seg').children) b.classList.toggle('on', b.dataset.v === (ex ? '1' : '0'));
+    $('ex-pickers').hidden = !ex;
+    for (const [id, val] of [['ex-native', ex?.native || myLangs[0]], ['ex-learn', ex?.learn || (myLangs[0] === 'en' ? 'es' : 'en')]]) {
+      const sel = $(id);
+      if (!sel.options.length) sel.innerHTML = Object.keys(LANG_META).map(l => `<option value="${l}">${langLabel(l)}</option>`).join('');
+      sel.value = val;
+    }
+  }
+  function sendExchange(on) {
+    const native = $('ex-native').value, learn = $('ex-learn').value;
+    if (on && native === learn) return toast(t('ex_same'));
+    send({ t: 'profile', exchange: on ? { native, learn } : null });
+    haptic();
+  }
+  $('ex-seg').onclick = e => {
+    const v = e.target.closest('[data-v]')?.dataset.v;
+    if (!v) return;
+    if (v === '1') { $('ex-pickers').hidden = false; sendExchange(true); toast(t('ex_saved'), 3500); }
+    else sendExchange(false);
+  };
+  $('ex-native').onchange = $('ex-learn').onchange = () => { if (!$('ex-pickers').hidden) sendExchange(true); };
+
+  // В разговоре: какой язык сейчас, обратный отсчёт до смены, подсказка темы на текущем языке
+  let exTimer = null, exPlan = null;
+  function startExchange(plan) {
+    stopExchange();
+    if (!plan) return;
+    exPlan = { ...plan, at: Date.now(), switched: false };
+    const tick = () => {
+      if (!exPlan) return;
+      const el2 = $('ex-chip');
+      const elapsed = (Date.now() - exPlan.at) / 1000, half = exPlan.halfSec;
+      let text;
+      if (!exPlan.second) text = t('ex_practice', { lang: langLabel(exPlan.first) });
+      else if (elapsed < half) text = t('ex_now', { lang: langLabel(exPlan.first), t: mmss(Math.max(0, (half - elapsed) * 1000)) });
+      else if (elapsed < 2 * half) {
+        if (!exPlan.switched) { exPlan.switched = true; toast(t('ex_switch', { lang: langLabel(exPlan.second) }), 4000); haptic('success'); }
+        text = t('ex_now', { lang: langLabel(exPlan.second), t: mmss((2 * half - elapsed) * 1000) });
+      } else text = t('ex_free');
+      el2.replaceChildren(`🗣 ${text}`);
+      if (aiFeatures.icebreakers) {
+        const tip = document.createElement('button');
+        tip.textContent = '💡';
+        tip.onclick = () => {
+          const cur = !exPlan.second || elapsed < half ? exPlan.first : exPlan.second;
+          send({ t: 'ai_topic', lang: cur });
+          haptic();
+        };
+        el2.append(tip);
+      }
+      el2.hidden = false;
+    };
+    tick();
+    exTimer = setInterval(tick, 1000);
+  }
+  function stopExchange() { clearInterval(exTimer); exPlan = null; $('ex-chip').hidden = true; }
 
   // ---------- Друзья в Aura: список и звонки ----------
   let friends = [];

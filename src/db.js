@@ -33,6 +33,8 @@ const USER_COLUMNS = {
   tz_min: 'INTEGER NOT NULL DEFAULT -10000',      // смещение от UTC в минутах; -10000 — неизвестно
   crowd_until: 'INTEGER NOT NULL DEFAULT 0',      // «позовите, когда соберутся» — подписка до
   crowd_notified_at: 'INTEGER NOT NULL DEFAULT 0',
+  ex_native: "TEXT NOT NULL DEFAULT ''",          // языковой обмен: мой язык
+  ex_learn: "TEXT NOT NULL DEFAULT ''",           // языковой обмен: учу
 };
 
 // Пользователи, жалобы, платежи, комнаты, оценки. SQLite в одном файле — хватает на один процесс.
@@ -145,6 +147,9 @@ export class Db {
     this.db.prepare('UPDATE users SET gender = ?, want = ?, langs = ? WHERE id = ?').run(gender, want, langs.join(','), id);
   }
 
+  setExchange(id, ex) {
+    this.db.prepare('UPDATE users SET ex_native = ?, ex_learn = ? WHERE id = ?').run(ex?.native || '', ex?.learn || '', id);
+  }
   setReveal(id, on) { this.db.prepare('UPDATE users SET reveal = ? WHERE id = ?').run(on ? 1 : 0, id); }
   setCountry(id, country) { this.db.prepare('UPDATE users SET country = ? WHERE id = ?').run(country, id); }
 

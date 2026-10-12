@@ -7,10 +7,13 @@ import { shareLang } from './langs.js';
 //   повтор с последним собеседником — после rematchAfterMs, смешение уровней ауры — после tierRelaxMs.
 // Жёсткие — никогда: общий язык, одна комната, фильтр по полу.
 const wants = (a, b) => a.want === 'any' || a.want === b.gender;
+export const exchangeMirror = (a, b) => Boolean(a.exchange && b.exchange
+  && a.exchange.native === b.exchange.learn && b.exchange.native === a.exchange.learn);
 
 export class Matchmaker {
-  constructor({ rematchAfterMs = 10_000, tierRelaxMs = 15_000, newbieRelaxMs = 40_000, onPair = () => {}, onUnpair = () => {}, peerInfo = null } = {}) {
+  constructor({ rematchAfterMs = 10_000, tierRelaxMs = 15_000, newbieRelaxMs = 40_000, exchangeRelaxMs = 25_000, onPair = () => {}, onUnpair = () => {}, peerInfo = null } = {}) {
     this.newbieRelaxMs = newbieRelaxMs;
+    this.exchangeRelaxMs = exchangeRelaxMs;
     // peerInfo(self, other, common) → что клиент self узнаёт о собеседнике (сервер прячет страну на время игры «Угадай»)
     this.peerInfo = peerInfo;
     this.rematchAfterMs = rematchAfterMs;
@@ -32,6 +35,14 @@ export class Matchmaker {
     if (!shareLang(a.langs || ['ru'], b.langs || ['ru'])) return false;
     if (!wants(a, b) || !wants(b, a)) return false;
     const both = ms => this.waited(a, now) >= ms && this.waited(b, now) >= ms;
+    // Языковой обмен: сначала только «зеркальная» пара (мой язык ↔ его изучаемый), через 25 с —
+    // любой собеседник, который говорит на языке, который учит участник обмена
+    if (a.exchange || b.exchange) {
+      if (!exchangeMirror(a, b)) {
+        if (!both(this.exchangeRelaxMs)) return false;
+        for (const [x, y] of [[a, b], [b, a]]) if (x.exchange && !(y.langs || []).includes(x.exchange.learn)) return false;
+      }
+    }
     if ((a.tier || 'ok') !== (b.tier || 'ok') && !both(this.tierRelaxMs)) return false;
     // Новичка не сводим с людьми с плохой репутацией — первое впечатление решает, вернётся ли он
     if (((a.newbie && b.tier === 'low') || (b.newbie && a.tier === 'low')) && !both(this.newbieRelaxMs)) return false;

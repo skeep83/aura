@@ -628,3 +628,11 @@ a { color: var(--accent); text-decoration: none; font-weight: 600; }
 .live-qr canvas { width: 146px; height: 146px; }
 .live-qr b { font-size: 12px; line-height: 1.2; }
 .live-qr small { font-size: 10px; color: #5a6080; word-break: break-all; }
+
+/* Языковой обмен */
+.ex-pickers { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
+.ex-pickers[hidden] { display: none; }
+.ex-pickers label { display: flex; flex-direction: column; gap: 4px; font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+.ex-pickers select { height: 42px; padding: 0 10px; border-radius: 14px; border: 1px solid var(--line); background: var(--fill); color: var(--title); font: inherit; font-weight: 600; text-transform: none; letter-spacing: 0; }
+.ex-chip { background: linear-gradient(135deg, rgba(54,209,240,.85), rgba(90,79,240,.85)); }
+.ex-chip button { text-decoration: none; font-size: 14px; }

@@ -5,7 +5,7 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { validateInitData, turnCredentials } from './auth.js';
-import { Matchmaker } from './matchmaker.js';
+import { Matchmaker, exchangeMirror } from './matchmaker.js';
 import { Db } from './db.js';
 import { Moderation } from './moderation.js';
 import { createBot } from './bot.js';
@@ -66,6 +66,19 @@ const plans = {
 const FREE_REACTIONS = ['heart', 'laugh', 'fire', 'clap'];
 const COMPLIMENTS = ['smile', 'funny', 'smart', 'kind', 'voice', 'world'];
 const GUESS_MS = 20_000;
+const EXCHANGE_HALF_SEC = Number(env.EXCHANGE_HALF_SEC || 300); // языковой обмен: минут на каждый язык
+const validExchange = ex => ex && LANGS.includes(ex.native) && LANGS.includes(ex.learn) && ex.native !== ex.learn
+  ? { native: ex.native, learn: ex.learn } : null;
+function applyLangs(c) { c.langs = c.exchange ? [c.exchange.native, c.exchange.learn] : c.baseLangs; }
+// Что показать паре участников обмена: какой язык первый, какой второй (одинаково для обоих)
+function exchangeInfo(self, o) {
+  if (exchangeMirror(self, o)) {
+    const first = self.id < o.id ? self : o;
+    return { first: first.exchange.learn, second: first.exchange.native, halfSec: EXCHANGE_HALF_SEC };
+  }
+  const x = self.exchange ? self : o.exchange ? o : null;
+  return x ? { first: x.exchange.learn, second: null, halfSec: EXCHANGE_HALF_SEC } : null;
+}
 // «Позовите, когда соберутся»: порог людей онлайн на языке подписчика
 const CROWD_MIN = Number(env.CROWD_MIN || 8);
 // Варианты для «Угадай, откуда он»: популярные страны аудитории
@@ -156,6 +169,11 @@ const mm = new Matchmaker({
     if (self.direct) {
       const hideName = self.direct === 'live' && self.live?.role === 'host'; // имя зрителя не попадает в трансляцию
       return { gender: o.gender, langs: common, country: o.country || null, direct: self.direct, name: hideName ? '' : o.name || '' };
+    }
+    const exchange = exchangeInfo(self, o);
+    if (exchange) {
+      const base = { gender: o.gender, langs: common, country: o.country || null, exchange };
+      return base;
     }
     if (self.country && o.country && self.country !== o.country) {
       self.guess = { answer: o.country, options: guessOptions(o.country, self.country), done: false, stamp: null };
@@ -274,7 +292,7 @@ function profileOf(c) {
   const u = db.user(c.id);
   const aura = auraOf(u);
   return {
-    gender: c.gender, want: c.want, langs: c.langs, premium: c.premium, premiumUntil: u.premium_until,
+    gender: c.gender, want: c.want, langs: c.baseLangs || c.langs, exchange: c.exchange || null, premium: c.premium, premiumUntil: u.premium_until,
     strikes: u.strikes, aura: aura.points, streak: db.streakOf(c.id, today(), yesterday()),
     filterLeft: c.premium ? null : db.filterLeft(c.id, today(), cfg.freeFilterPerDay),
     notifyEvents: Boolean(u.notify_events), allowsPm: Boolean(u.allows_pm),
@@ -652,7 +670,8 @@ wss.on('connection', (ws, req) => {
     const u = db.user(user.id);
     client = {
       id: user.id, name: user.name || '', username: user.username || '',
-      gender: u.gender, want: u.want, langs: normalizeLangs(u.langs, user.lang),
+      gender: u.gender, want: u.want, baseLangs: normalizeLangs(u.langs, user.lang),
+      exchange: validExchange({ native: u.ex_native, learn: u.ex_learn }),
       premium: db.isPremium(u), room, tier: auraOf(u).tier, vibe: null, rateTarget: null,
       matches: db.matchCount(user.id),
       reveal: Boolean(u.reveal), country: /^[A-Z]{2}$/.test(country) && !['XX', 'T1'].includes(country) ? country
@@ -662,6 +681,7 @@ wss.on('connection', (ws, req) => {
     };
     if (!client.premium && !db.filterLeft(client.id, today(), cfg.freeFilterPerDay)) client.want = 'any';
     setStanding(client, u);
+    applyLangs(client);
     // Часовой пояс устройства (минуты к UTC) — для Aura Hour по местному времени
     const tz = Number(msg.tz);
     if (Number.isInteger(tz) && tz >= -720 && tz <= 840) { client.tz = tz; if (tz !== u.tz_min) db.setTz(user.id, tz); }
@@ -903,14 +923,20 @@ wss.on('connection', (ws, req) => {
     switch (msg.t) {
       case 'profile': {
         if (['m', 'f', 'x'].includes(msg.gender)) client.gender = msg.gender;
-        if (msg.langs) client.langs = normalizeLangs(msg.langs, client.langs[0]);
+        if (msg.langs) client.baseLangs = normalizeLangs(msg.langs, client.baseLangs[0]);
+        if ('exchange' in msg) {
+          client.exchange = validExchange(msg.exchange);
+          db.setExchange(client.id, client.exchange);
+          db.event(client.exchange ? 'exchange_on' : 'exchange_off', client.id, 0, client.exchange ? `${client.exchange.native}>${client.exchange.learn}` : '');
+        }
+        applyLangs(client);
         if (['any', 'm', 'f'].includes(msg.want)) {
           const canFilter = client.premium || db.filterLeft(client.id, today(), cfg.freeFilterPerDay) > 0;
           client.want = canFilter ? msg.want : 'any';
         }
         if (typeof msg.notifyEvents === 'boolean') db.setNotify(client.id, msg.notifyEvents);
         if (typeof msg.reveal === 'boolean') { client.reveal = msg.reveal; db.setReveal(client.id, msg.reveal); }
-        db.setProfile(client.id, client);
+        db.setProfile(client.id, { ...client, langs: client.baseLangs });
         send({ t: 'me', me: profileOf(client) });
         break;
       }
@@ -1092,7 +1118,7 @@ wss.on('connection', (ws, req) => {
         const now = Date.now();
         if (!peer || now - lastTopic < 5000) return;
         lastTopic = now;
-        const lang = client.langs.find(l => peer.langs.includes(l)) || client.langs[0];
+        const lang = peer.langs.includes(msg.lang) && client.langs.includes(msg.lang) ? msg.lang : client.langs.find(l => peer.langs.includes(l)) || client.langs[0];
         client.topics = client.topics || [];
         ai.icebreaker({ lang, countries: [client.country, peer.country], recent: client.topics })
           .then(text => {

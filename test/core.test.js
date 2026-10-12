@@ -278,3 +278,21 @@ test('«позовите, когда соберутся»: подписчик п
   db.setCrowd('u1', false, now);
   assert.deepEqual(db.crowdAudience('en', now + 21 * 3600_000), []);
 });
+
+test('языковой обмен: зеркальная пара сразу, остальные — через 25 с и только носители изучаемого языка', () => {
+  const mkc = (id, extra = {}) => ({ id, gender: 'm', want: 'any', send() {}, ...extra });
+  const t0 = 2_000_000;
+  const ruEn = () => mkc('ruEn', { exchange: { native: 'ru', learn: 'en' }, langs: ['ru', 'en'] });
+  // Зеркало: ru→en и en→ru сводятся сразу
+  const mm = new Matchmaker();
+  const a = ruEn(), b = mkc('enRu', { exchange: { native: 'en', learn: 'ru' }, langs: ['en', 'ru'] });
+  mm.enqueue(a, t0); mm.enqueue(b, t0);
+  assert.equal(mm.peerOf(a), b);
+  // Обычный англоговорящий — только через 25 с ожидания обоих
+  const mm2 = new Matchmaker();
+  const c = ruEn(), en = mkc('en', { langs: ['en'] }), ruOnly = mkc('ru', { langs: ['ru'] });
+  mm2.enqueue(c, t0); mm2.enqueue(ruOnly, t0); mm2.enqueue(en, t0);
+  assert.equal(mm2.peerOf(c), null);
+  mm2.tick(t0 + 26_000);
+  assert.equal(mm2.peerOf(c), en); // носитель изучаемого языка, а не русскоязычный
+});

@@ -558,3 +558,21 @@ test('Комната стримера: очередь зрителей, ход �
   await until(h, 'live', m => m.state === 'stopped');
   for (const x of [h, v1, v2, v3]) x.ws.close();
 });
+
+test('Языковой обмен: настройка в профиле и одинаковый план языков у пары', async t => {
+  const port = await startServer(t);
+  const a = await client(port, 'dev-ex-a'), b = await client(port, 'dev-ex-b');
+  a.send({ t: 'profile', exchange: { native: 'ru', learn: 'en' } });
+  assert.deepEqual((await until(a, 'me', m => m.me.exchange)).me.exchange, { native: 'ru', learn: 'en' });
+  b.send({ t: 'profile', exchange: { native: 'en', learn: 'ru' } });
+  await until(b, 'me', m => m.me.exchange);
+  a.send({ t: 'find' }); b.send({ t: 'find' });
+  const ma = await a.next('matched'), mb = await b.next('matched');
+  assert.deepEqual(ma.peer.exchange, mb.peer.exchange);
+  assert.equal(ma.peer.exchange.halfSec, 300);
+  assert.deepEqual([ma.peer.exchange.first, ma.peer.exchange.second].sort(), ['en', 'ru']);
+  // Выключение обмена возвращает обычные языки
+  a.send({ t: 'profile', exchange: null });
+  assert.equal((await until(a, 'me', m => m.me.exchange === null)).me.exchange, null);
+  a.ws.close(); b.ws.close();
+});
