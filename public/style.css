@@ -239,8 +239,11 @@ a { color: var(--accent); text-decoration: none; font-weight: 600; }
 .pip { position: absolute; z-index: 6; top: calc(64px + var(--safe-top)); right: 12px; width: 27%; max-width: 116px; aspect-ratio: 3 / 4;
   padding: 3px; border-radius: 22px; touch-action: none; cursor: grab; transition: left .5s var(--spring), top .5s var(--spring); }
 .pip.dragging { transition: none; cursor: grabbing; }
-.pip video { width: 100%; height: 100%; object-fit: cover; border-radius: 19px; background: #1a1e38; transform: scaleX(-1); display: block; }
-.pip.rear video { transform: none; }
+.pip video { width: 100%; height: 100%; object-fit: cover; border-radius: 19px; background: #1a1e38; display: block; }
+/* Своя камера зеркалится (как в зеркале), собеседник — нет; в каком окне — неважно */
+#local { transform: scaleX(-1); }
+.pip.rear #local { transform: none; }
+.pip { cursor: pointer; }
 .searching:not(.gone) ~ .pip { opacity: 0; pointer-events: none; }
 .pip { transition: left .5s var(--spring), top .5s var(--spring), opacity .4s; }
 
@@ -559,3 +562,11 @@ a { color: var(--accent); text-decoration: none; font-weight: 600; }
 .share-btn i { font-style: normal; font-size: 20px; }
 .share-btn.wide { grid-column: 1 / -1; justify-content: center; }
 .share-btn[hidden] { display: none; }
+
+/* Видео поменяны местами: своя камера на весь экран, собеседник в маленьком окне */
+#chat.swapped .stage > #local { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; border-radius: 0; background: transparent;
+  transition: transform .5s var(--ease), opacity .5s; }
+#chat.swapped .stage > #local.out { transform: translateX(-108%) scaleX(-1); opacity: 0; }
+#chat.swapped .stage > #local.dragging { transition: none; }
+#chat.swapped .pip #remote { position: static; transition: filter .8s var(--ease); }
+#chat.swapped .pip #remote.veil { filter: blur(10px) brightness(.85); }

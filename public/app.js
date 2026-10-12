@@ -214,6 +214,7 @@
     $('vibe-btn').classList.remove('on');
     peerInfo = null;
     matchedAt = 0;
+    setSwap(false);
     stopReveal();
     stopGuess();
     $('moment-ask').hidden = true;
@@ -1467,7 +1468,7 @@
 
   function swipeNext() {
     if (state !== 'talking') return next();
-    el.remote.classList.add('out');
+    mainVideo().classList.add('out');
     setTimeout(next, 200);
   }
 
@@ -1655,8 +1656,8 @@
       if (x0 === null) return;
       dx = Math.min(0, e.clientX - x0);
       if (Math.abs(e.clientY - y0) > Math.abs(dx) + 20) { x0 = null; return; }
-      el.remote.classList.add('dragging');
-      el.remote.style.transform = `translateX(${dx}px) rotate(${dx / 60}deg)`;
+      mainVideo().classList.add('dragging');
+      mainVideo().style.transform = `translateX(${dx}px) rotate(${dx / 60}deg)${swapped ? " scaleX(-1)" : ""}`;
       const p = Math.min(1, -dx / 120);
       hint.style.opacity = p;
       hint.style.transform = `scale(${0.6 + p * 0.4})`;
@@ -1664,8 +1665,7 @@
     const end = () => {
       if (x0 === null) return;
       x0 = null;
-      el.remote.classList.remove('dragging');
-      el.remote.style.transform = '';
+      for (const v of [el.remote, el.local]) { v.classList.remove('dragging'); v.style.transform = ''; }
       hint.style.opacity = 0;
       hint.style.transform = '';
       if (dx < -110) swipeNext();
@@ -1673,6 +1673,28 @@
     el.stage.addEventListener('pointerup', end);
     el.stage.addEventListener('pointercancel', end);
   })();
+
+  // ---------- Смена видео местами: тап по маленькому окну ----------
+  // Видео-элементы физически переставляются: #remote всегда показывает собеседника, #local — свою камеру,
+  // поэтому модерация, Moment, «Сначала голос» и маска работают одинаково в обоих положениях.
+  let swapped = false;
+  const mainVideo = () => (swapped ? el.local : el.remote);
+  function setSwap(on) {
+    if (swapped === on) return;
+    swapped = on;
+    if (on) { el.stage.insertBefore(el.local, el.remote); el.pip.appendChild(el.remote); }
+    else { el.stage.insertBefore(el.remote, el.local); el.pip.appendChild(el.local); }
+    $('chat').classList.toggle('swapped', on);
+    el.local.classList.remove('out', 'dragging');
+    el.local.style.transform = '';
+    el.remote.play().catch(() => {});
+    el.local.play().catch(() => {});
+  }
+  function toggleSwap() {
+    if (state !== 'talking' || duo.active) return;
+    setSwap(!swapped);
+    haptic('soft');
+  }
 
   // ---------- Перетаскиваемое окно своей камеры, прилипает к углам рамки ----------
   (() => {
@@ -1682,7 +1704,7 @@
     pip.addEventListener('pointerdown', e => {
       e.stopPropagation(); // не запускать свайп «Далее»
       const r = pip.getBoundingClientRect();
-      start = { x: e.clientX - r.left, y: e.clientY - r.top };
+      start = { x: e.clientX - r.left, y: e.clientY - r.top, cx: e.clientX, cy: e.clientY, at: performance.now() };
       pip.setPointerCapture(e.pointerId);
       pip.classList.add('dragging');
     });
@@ -1693,10 +1715,13 @@
       pip.style.left = `${e.clientX - s.left - start.x}px`;
       pip.style.top = `${e.clientY - s.top - start.y}px`;
     });
-    pip.addEventListener('pointerup', () => {
+    pip.addEventListener('pointerup', e => {
       if (!start) return;
+      // Короткий тап без сдвига — поменять видео местами (окно остаётся на месте)
+      const tap = Math.hypot(e.clientX - start.cx, e.clientY - start.cy) < 8 && performance.now() - start.at < 350;
       start = null;
       pip.classList.remove('dragging');
+      if (tap) return toggleSwap();
       const s = el.stage.getBoundingClientRect();
       const r = pip.getBoundingClientRect();
       const minTop = document.querySelector('.topbar').getBoundingClientRect().bottom - s.top + M;
