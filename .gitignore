@@ -13,3 +13,5 @@ data/
 secrets/
 .build/
 branding/ads/*.mp4
+branding/tapps/screen-*.png
+branding/tapps/*.zip

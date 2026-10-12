@@ -191,6 +191,21 @@
     const pulse = t > 10.4 ? 1 + 0.05 * Math.sin((t - 10.4) * 6) : 1;
     show($('cta'), t >= 9.9 ? easeOut(seg(t, 9.9, 10.4)) : 0, `translateX(-50%) scale(${(0.8 + 0.2 * back(seg(t, 9.9, 10.4))) * pulse})`);
   };
-  render(Number(q.get('t') || 5));
+  // Скриншоты для каталогов: ?shot=1..5 — свой заголовок вместо слогана, кадр анимации по сюжету
+  const SHOTS = {
+    ru: ['🎯 Угадай, откуда собеседник', '👉 Свайп — и новый человек', '💫 Реакции прямо в звонке', '✨ Взаимный вайб — и вы на связи', '🛂 Собирай страны в паспорт'],
+    en: ['🎯 Guess where they’re from', '👉 Swipe — meet someone new', '💫 Reactions right in the call', '✨ Mutual vibe — stay in touch', '🛂 Collect countries in your passport'],
+    es: ['🎯 Adivina de dónde es', '👉 Desliza — alguien nuevo', '💫 Reacciones en la llamada', '✨ Vibe mutuo — sigan en contacto', '🛂 Colecciona países'],
+    de: ['🎯 Rate, woher er kommt', '👉 Wischen — neue Person', '💫 Reaktionen im Call', '✨ Gegenseitiger Vibe — bleibt in Kontakt', '🛂 Sammle Länder im Pass'],
+    pt: ['🎯 Adivinhe de onde é', '👉 Deslize — alguém novo', '💫 Reações na chamada', '✨ Vibe mútua — fiquem em contato', '🛂 Junte países no passaporte'],
+  };
+  const shot = Number(q.get('shot') || 0);
+  if (shot) {
+    const caps = SHOTS[q.get('lang')] || SHOTS.en;
+    $('h1').textContent = caps[shot - 1];
+    window.SHOT_T = [2.7, 3.42, 4.9, 5.75, 8.7][shot - 1];
+  }
+  render(window.SHOT_T ?? Number(q.get('t') || 5));
+  if (shot && shot !== 5) $('banner').style.opacity = shot === 4 ? 1 : 0;
 </script>
 </body></html>
