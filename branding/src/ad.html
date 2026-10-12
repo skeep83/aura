@@ -1,0 +1,112 @@
+<!doctype html>
+<!-- Рекламный креатив Aura. Параметры: ?lang=ru|en|es|de|pt&fmt=square|story
+     Рендер: Chrome --headless --window-size=540,540 (или 540,960) --force-device-scale-factor=2 → 1080×1080 / 1080×1920 -->
+<html><head><meta charset="utf-8">
+<style>
+  html, body { margin: 0; overflow: hidden; }
+  body { position: relative; font-family: "Avenir Next", "Helvetica Neue", -apple-system, sans-serif; color: #fff;
+    background: linear-gradient(150deg, #36d1f0 0%, #4a86f7 48%, #5a4ff0 100%); }
+  body.square { width: 540px; height: 540px; }
+  body.story { width: 540px; height: 960px; }
+  .blob { position: absolute; border-radius: 50%; background: rgba(255,255,255,.15); }
+  .tube { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .wrap { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; }
+
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 26px; letter-spacing: -.01em; }
+  .brand img { width: 40px; height: 40px; border-radius: 12px; box-shadow: 0 0 0 1px rgba(255,255,255,.6), 0 8px 18px rgba(20,20,110,.3); }
+  h1 { margin: 0; text-align: center; font-weight: 800; letter-spacing: -.02em; line-height: 1.02; text-shadow: 0 4px 18px rgba(20,20,110,.25); }
+  .sub { text-align: center; font-weight: 600; opacity: .95; }
+
+  /* «Телефон» со звонком: собеседник из другой страны, своё окно, реакции, угадай страну */
+  .phone { position: relative; border-radius: 34px; overflow: hidden; background: #1a1e38;
+    box-shadow: 0 0 0 7px rgba(255,255,255,.9), 0 30px 60px rgba(20,20,110,.45); }
+  .peer { position: absolute; inset: 0; background: linear-gradient(160deg, #ffb37a, #ff6f91 55%, #8a5cf6); display: grid; place-items: center; }
+  .peer .face { font-size: 120px; filter: drop-shadow(0 10px 20px rgba(0,0,0,.25)); }
+  .me { position: absolute; right: 10px; top: 10px; width: 30%; aspect-ratio: 3/4; border-radius: 14px; overflow: hidden;
+    background: linear-gradient(160deg, #6ee7ff, #4a86f7); display: grid; place-items: center; font-size: 36px; box-shadow: 0 0 0 2px rgba(255,255,255,.8); }
+  .chip { position: absolute; padding: 6px 11px; border-radius: 999px; font-size: 13px; font-weight: 700; color: #fff; white-space: nowrap;
+    background: rgba(20,24,60,.42); border: 1px solid rgba(255,255,255,.5); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
+  .guess { left: 10px; top: 12px; }
+  .fly { position: absolute; font-size: 30px; }
+  .dock { position: absolute; left: 10px; right: 10px; bottom: 10px; height: 44px; border-radius: 999px; background: rgba(255,255,255,.2);
+    border: 1px solid rgba(255,255,255,.5); display: flex; align-items: center; justify-content: center; }
+  .next { padding: 8px 22px; border-radius: 999px; font-size: 13px; font-weight: 800; letter-spacing: .06em;
+    background: linear-gradient(135deg, #36d1f0, #5a4ff0); box-shadow: 0 6px 16px rgba(74,110,245,.6); }
+
+  .flags { font-size: 22px; letter-spacing: 4px; text-align: center; }
+  .cta { padding: 14px 30px; border-radius: 999px; background: #fff; color: #4a74f5; font-weight: 800; font-size: 19px;
+    box-shadow: 0 12px 30px rgba(20,20,110,.3); display: inline-flex; align-items: center; gap: 10px; }
+  .cta svg { width: 22px; height: 22px; }
+
+  /* Раскладки */
+  .square .wrap { padding: 22px 28px 24px; gap: 12px; }
+  .square .brand { font-size: 22px; } .square .brand img { width: 34px; height: 34px; }
+  .square h1 { font-size: 34px; }
+  .square .sub, .square .flags { display: none; }
+  .square .row { display: flex; align-items: center; gap: 20px; }
+  .square .phone { width: 196px; height: 290px; }
+  .square .peer .face { font-size: 104px; }
+  .square .side { display: flex; flex-direction: column; gap: 9px; width: 240px; }
+  .square .feat { padding: 10px 12px; border-radius: 16px; background: rgba(255,255,255,.18); border: 1px solid rgba(255,255,255,.45); font-size: 15px; font-weight: 700; }
+  .square .cta { font-size: 18px; padding: 13px 28px; margin-top: 4px; }
+
+  .story .wrap { padding: 54px 34px 54px; gap: 16px; }
+  .story h1 { font-size: 46px; }
+  .story .sub { font-size: 18px; max-width: 430px; }
+  .story .phone { width: 280px; height: 410px; margin-top: 4px; }
+  .story .peer .face { font-size: 150px; }
+  .story .feats { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; max-width: 470px; }
+  .story .feat { padding: 8px 13px; border-radius: 999px; background: rgba(255,255,255,.2); border: 1px solid rgba(255,255,255,.5); font-size: 14px; font-weight: 700; }
+  .story .cta { font-size: 20px; padding: 15px 32px; margin-top: auto; }
+  .story .side { display: none; }
+  .square .feats { display: none; }
+</style></head>
+<body>
+  <div class="blob" style="width:420px;height:420px;right:-160px;top:-170px"></div>
+  <div class="blob" style="width:320px;height:320px;left:-140px;bottom:-150px;opacity:.7"></div>
+  <svg class="tube" viewBox="0 0 540 960" preserveAspectRatio="none">
+    <defs><linearGradient id="t" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#7ff0ff"/><stop offset="1" stop-color="#3b2fd6"/></linearGradient></defs>
+    <path d="M-60 760 C 120 600 260 880 420 700 S 600 520 640 560" fill="none" stroke="url(#t)" stroke-width="60" stroke-linecap="round" opacity=".45"/>
+  </svg>
+  <div class="wrap">
+    <div class="brand"><img src="../logo.svg" alt="">aura</div>
+    <h1 id="h1"></h1>
+    <div class="sub" id="sub"></div>
+    <div class="row">
+      <div class="phone">
+        <div class="peer"><div class="face">😄</div></div>
+        <div class="me">🙂</div>
+        <div class="chip guess" id="guess"></div>
+        <div class="fly" style="left:16px;bottom:120px">❤️</div>
+        <div class="fly" style="left:52px;bottom:160px;font-size:24px">🔥</div>
+        <div class="fly" style="left:24px;bottom:198px;font-size:20px">😂</div>
+        <div class="dock"><span class="next" id="next"></span></div>
+      </div>
+      <div class="side" id="side"></div>
+    </div>
+    <div class="feats" id="feats"></div>
+    <div class="flags">🇧🇷 🇩🇪 🇰🇿 🇪🇸 🇯🇵 🇹🇷 🇺🇸 🇮🇩 🇲🇽</div>
+    <div class="cta"><svg viewBox="0 0 24 24" fill="#4a74f5"><path d="M21.4 4.3 2.9 11.4c-1.3.5-1.3 1.2-.2 1.6l4.7 1.5 1.8 5.6c.2.6.1.9.8.9.5 0 .7-.2 1-.5l2.3-2.2 4.7 3.5c.9.5 1.5.2 1.7-.8l3.1-14.7c.3-1.3-.5-1.9-1.4-1.5Z"/></svg><span id="cta"></span></div>
+  </div>
+<script>
+  const T = {
+    ru: { h1: 'Видеочат со всем миром', sub: 'Один свайп — новый собеседник. Прямо в Telegram, без регистрации', guess: '🎯 Угадай, откуда он', next: 'ДАЛЕЕ',
+      feats: ['🌍 Подбор по языку', '🎲 Игры в звонке', '🎭 Маска для стеснительных', '🛂 Паспорт стран'], cta: 'Открыть в Telegram' },
+    en: { h1: 'Video chat with the whole world', sub: 'One swipe — a new person. Right inside Telegram, no sign-up', guess: '🎯 Guess where they’re from', next: 'NEXT',
+      feats: ['🌍 Matched by language', '🎲 Games in calls', '🎭 Mask for the shy', '🛂 Country passport'], cta: 'Open in Telegram' },
+    es: { h1: 'Videochat con todo el mundo', sub: 'Un deslizamiento — otra persona. Dentro de Telegram, sin registro', guess: '🎯 Adivina de dónde es', next: 'SIGUIENTE',
+      feats: ['🌍 Por idioma', '🎲 Juegos en llamada', '🎭 Máscara para tímidos', '🛂 Pasaporte de países'], cta: 'Abrir en Telegram' },
+    de: { h1: 'Videochat mit der ganzen Welt', sub: 'Ein Wisch — eine neue Person. Direkt in Telegram, ohne Anmeldung', guess: '🎯 Rate, woher er kommt', next: 'WEITER',
+      feats: ['🌍 Nach Sprache', '🎲 Spiele im Call', '🎭 Maske für Schüchterne', '🛂 Länder-Pass'], cta: 'In Telegram öffnen' },
+    pt: { h1: 'Videochat com o mundo inteiro', sub: 'Um deslize — uma nova pessoa. Dentro do Telegram, sem cadastro', guess: '🎯 Adivinhe de onde é', next: 'PRÓXIMO',
+      feats: ['🌍 Por idioma', '🎲 Jogos na chamada', '🎭 Máscara para tímidos', '🛂 Passaporte de países'], cta: 'Abrir no Telegram' },
+  };
+  const q = new URLSearchParams(location.search);
+  const d = T[q.get('lang')] || T.en;
+  document.body.className = q.get('fmt') === 'story' ? 'story' : 'square';
+  for (const k of ['h1', 'sub', 'guess', 'next', 'cta']) document.getElementById(k).textContent = d[k];
+  const feat = t => { const e = document.createElement('div'); e.className = 'feat'; e.textContent = t; return e; };
+  document.getElementById('side').append(...d.feats.map(feat));
+  document.getElementById('feats').append(...d.feats.map(feat));
+</script>
+</body></html>

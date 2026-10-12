@@ -1,0 +1,86 @@
+<!doctype html>
+<!-- Посадочная страница для рекламы вне Telegram (Meta, TikTok, Google): /go?c=<код кампании>.
+     Отмечает переход (событие landing) и ведёт в бота с тем же кодом: t.me/<бот>?start=ad_<код> -->
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Aura — видеочат со всем миром в Telegram</title>
+  <meta name="description" content="Видеочат со случайными людьми со всего мира прямо в Telegram. Подбор по языку, без регистрации, автомодерация 18+.">
+  <meta property="og:title" content="Aura — видеочат со всем миром">
+  <meta property="og:description" content="Один свайп — новый собеседник. Прямо в Telegram.">
+  <meta property="og:image" content="https://aura-life.online/brand/cover-ru-640x360.png">
+  <meta name="theme-color" content="#4a86f7">
+  <link rel="icon" href="icon.svg">
+  <style>
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; }
+    body { font-family: -apple-system, "SF Pro Display", "Segoe UI", Roboto, sans-serif; color: #fff; min-height: 100vh;
+      background: linear-gradient(150deg, #36d1f0 0%, #4a86f7 48%, #5a4ff0 100%); display: flex; justify-content: center; overflow-x: hidden; }
+    .blob { position: fixed; border-radius: 50%; background: rgba(255,255,255,.14); pointer-events: none; }
+    main { position: relative; width: 100%; max-width: 460px; padding: max(28px, env(safe-area-inset-top)) 20px 36px; display: flex; flex-direction: column; align-items: center; gap: 18px; text-align: center; }
+    .logo { width: 84px; height: 84px; border-radius: 26px; box-shadow: 0 0 0 1.5px rgba(255,255,255,.6), 0 16px 36px rgba(20,20,110,.35); }
+    h1 { margin: 0; font-size: 34px; line-height: 1.05; font-weight: 800; letter-spacing: -.02em; text-shadow: 0 4px 18px rgba(20,20,110,.25); }
+    .lead { margin: 0; font-size: 17px; font-weight: 600; opacity: .95; }
+    .cta { display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%; height: 58px; border-radius: 999px; background: #fff; color: #4a74f5;
+      font-size: 18px; font-weight: 800; text-decoration: none; box-shadow: 0 14px 34px rgba(20,20,110,.35); transition: transform .2s; }
+    .cta:active { transform: scale(.97); }
+    .cta svg { width: 24px; height: 24px; }
+    .feats { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; width: 100%; }
+    .feat { padding: 14px 12px; border-radius: 20px; background: rgba(255,255,255,.17); border: 1px solid rgba(255,255,255,.45); font-size: 14px; font-weight: 700; text-align: left; }
+    .feat i { display: block; font-style: normal; font-size: 24px; margin-bottom: 4px; }
+    .fine { font-size: 12px; opacity: .8; margin: 0; }
+    .fine a { color: #fff; }
+  </style>
+</head>
+<body>
+  <div class="blob" style="width:420px;height:420px;right:-170px;top:-160px"></div>
+  <div class="blob" style="width:320px;height:320px;left:-150px;bottom:-140px;opacity:.7"></div>
+  <main>
+    <img class="logo" src="brand/avatar-640.png" alt="Aura">
+    <h1 id="h1">Видеочат со всем миром</h1>
+    <p class="lead" id="lead">Один свайп — новый собеседник. Прямо в Telegram, без регистрации.</p>
+    <a class="cta" id="cta" href="https://t.me/you_aura_bot">
+      <svg viewBox="0 0 24 24" fill="#4a74f5"><path d="M21.4 4.3 2.9 11.4c-1.3.5-1.3 1.2-.2 1.6l4.7 1.5 1.8 5.6c.2.6.1.9.8.9.5 0 .7-.2 1-.5l2.3-2.2 4.7 3.5c.9.5 1.5.2 1.7-.8l3.1-14.7c.3-1.3-.5-1.9-1.4-1.5Z"/></svg>
+      <span id="cta-text">Открыть в Telegram</span>
+    </a>
+    <div class="feats" id="feats"></div>
+    <p class="fine" id="fine">18+ · автомодерация · видео не записывается · <a href="terms.html">правила</a> · <a href="privacy.html">конфиденциальность</a></p>
+  </main>
+  <script>
+    const T = {
+      ru: { h1: 'Видеочат со всем миром', lead: 'Один свайп — новый собеседник. Прямо в Telegram, без регистрации.', cta: 'Открыть в Telegram',
+        feats: [['🌍', 'Подбор по языку'], ['🎯', 'Угадай, откуда он'], ['🎭', 'Маска для стеснительных'], ['🛂', 'Паспорт стран']],
+        fine: '18+ · автомодерация · видео не записывается' },
+      en: { h1: 'Video chat with the whole world', lead: 'One swipe — a new person. Right inside Telegram, no sign-up.', cta: 'Open in Telegram',
+        feats: [['🌍', 'Matched by language'], ['🎯', 'Guess where they’re from'], ['🎭', 'Mask for the shy'], ['🛂', 'Country passport']],
+        fine: '18+ · AI moderation · no video recording' },
+      es: { h1: 'Videochat con todo el mundo', lead: 'Un deslizamiento — otra persona. Dentro de Telegram, sin registro.', cta: 'Abrir en Telegram',
+        feats: [['🌍', 'Por idioma'], ['🎯', 'Adivina de dónde es'], ['🎭', 'Máscara para tímidos'], ['🛂', 'Pasaporte de países']],
+        fine: '18+ · moderación automática · sin grabación de vídeo' },
+      de: { h1: 'Videochat mit der ganzen Welt', lead: 'Ein Wisch — eine neue Person. Direkt in Telegram, ohne Anmeldung.', cta: 'In Telegram öffnen',
+        feats: [['🌍', 'Nach Sprache'], ['🎯', 'Rate, woher er kommt'], ['🎭', 'Maske für Schüchterne'], ['🛂', 'Länder-Pass']],
+        fine: '18+ · automatische Moderation · keine Videoaufzeichnung' },
+      pt: { h1: 'Videochat com o mundo inteiro', lead: 'Um deslize — uma nova pessoa. Dentro do Telegram, sem cadastro.', cta: 'Abrir no Telegram',
+        feats: [['🌍', 'Por idioma'], ['🎯', 'Adivinhe de onde é'], ['🎭', 'Máscara para tímidos'], ['🛂', 'Passaporte de países']],
+        fine: '18+ · moderação automática · sem gravação de vídeo' },
+    };
+    const q = new URLSearchParams(location.search);
+    const code = (q.get('c') || 'web').replace(/[^\w-]/g, '').slice(0, 40) || 'web';
+    const lang = q.get('lang') || (navigator.language || 'en').slice(0, 2);
+    const d = T[lang] || T.en;
+    document.documentElement.lang = T[lang] ? lang : 'en';
+    document.title = `Aura — ${d.h1}`;
+    for (const k of ['h1', 'lead']) document.getElementById(k).textContent = d[k];
+    document.getElementById('cta-text').textContent = d.cta;
+    document.getElementById('feats').innerHTML = d.feats.map(([i, t]) => `<div class="feat"><i>${i}</i>${t}</div>`).join('');
+    document.getElementById('fine').firstChild.textContent = d.fine + ' · ';
+    const tg = `https://t.me/you_aura_bot?start=ad_${code}`;
+    document.getElementById('cta').href = tg;
+    // Отметка перехода (без cookies и личных данных) и клика по кнопке
+    const ping = ev => navigator.sendBeacon?.('/api/landing', JSON.stringify({ c: code, ev }));
+    ping('view');
+    document.getElementById('cta').addEventListener('click', () => ping('click'));
+  </script>
+</body>
+</html>

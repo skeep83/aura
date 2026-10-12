@@ -319,7 +319,19 @@ export class Db {
       FROM users u WHERE u.created_at > ? AND u.id NOT LIKE 'dev-%' GROUP BY 1 ORDER BY users DESC`).all(since);
     const starts = Object.fromEntries(this.db.prepare(
       "SELECT tag, COUNT(DISTINCT user_id) AS n FROM events WHERE type = 'bot_start' AND at > ? GROUP BY tag").all(since).map(r => [r.tag, r.n]));
-    return rows.map(r => ({ ...r, botStarts: starts[r.source.replace(/^ad:/, 'ad_')] || 0 }));
+    const landing = {};
+    for (const r of this.db.prepare("SELECT type, tag, COUNT(*) AS n FROM events WHERE type IN ('landing_view','landing_click') AND at > ? GROUP BY type, tag").all(since)) {
+      (landing[r.tag] ||= { views: 0, clicks: 0 })[r.type === 'landing_view' ? 'views' : 'clicks'] = r.n;
+    }
+    // Кампании, по которым были переходы, но ещё никто не открыл приложение — тоже показываем
+    for (const tag of Object.keys(landing)) {
+      const src = 'ad:' + tag.slice(3);
+      if (!rows.some(r => r.source === src)) rows.push({ source: src, users: 0, talked: 0, returned: 0, payers: 0, stars: 0 });
+    }
+    return rows.map(r => {
+      const tag = r.source.replace(/^ad:/, 'ad_');
+      return { ...r, botStarts: starts[tag] || 0, landingViews: landing[tag]?.views || 0, landingClicks: landing[tag]?.clicks || 0 };
+    });
   }
 
   // ---------- Рефералы: оба получают бонус, только для нового пользователя ----------

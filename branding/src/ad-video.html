@@ -1,0 +1,196 @@
+<!doctype html>
+<!-- Видеокреатив Aura (12 с). Кадр задаётся явно: render(t) — так рендер покадровый и без рывков.
+     ?lang=ru|en|es|de|pt&fmt=story|square. Сборка: node branding/render-video.mjs -->
+<html><head><meta charset="utf-8">
+<style>
+  html, body { margin: 0; overflow: hidden; }
+  body { position: relative; font-family: "Avenir Next", "Helvetica Neue", -apple-system, sans-serif; color: #fff;
+    background: linear-gradient(150deg, #36d1f0 0%, #4a86f7 48%, #5a4ff0 100%); }
+  body.story { width: 540px; height: 960px; }
+  body.square { width: 540px; height: 540px; }
+  .blob { position: absolute; border-radius: 50%; background: rgba(255,255,255,.15); }
+  .abs { position: absolute; }
+  .brand { left: 0; right: 0; display: flex; justify-content: center; align-items: center; gap: 10px; font-weight: 800; font-size: 26px; }
+  .brand img { width: 40px; height: 40px; border-radius: 12px; box-shadow: 0 0 0 1px rgba(255,255,255,.6), 0 8px 18px rgba(20,20,110,.3); }
+  h1 { margin: 0; left: 24px; right: 24px; text-align: center; font-weight: 800; letter-spacing: -.02em; line-height: 1.03; text-shadow: 0 4px 18px rgba(20,20,110,.25); }
+  .phone { left: 50%; border-radius: 34px; overflow: hidden; background: #1a1e38; box-shadow: 0 0 0 7px rgba(255,255,255,.92), 0 30px 60px rgba(20,20,110,.45); }
+  .peer { position: absolute; inset: 0; display: grid; place-items: center; }
+  .peer .face { filter: drop-shadow(0 10px 20px rgba(0,0,0,.25)); }
+  .me { position: absolute; right: 10px; top: 10px; width: 30%; aspect-ratio: 3/4; border-radius: 14px; background: linear-gradient(160deg, #6ee7ff, #4a86f7);
+    display: grid; place-items: center; box-shadow: 0 0 0 2px rgba(255,255,255,.85); z-index: 3; }
+  .chip { position: absolute; padding: 7px 12px; border-radius: 999px; font-weight: 800; white-space: nowrap; z-index: 4;
+    background: rgba(20,24,60,.45); border: 1px solid rgba(255,255,255,.55); }
+  .opts { position: absolute; left: 10px; right: 10px; display: grid; grid-template-columns: 1fr 1fr; gap: 6px; z-index: 4; }
+  .opt { padding: 7px 8px; border-radius: 12px; background: rgba(20,24,60,.42); border: 1px solid rgba(255,255,255,.4); font-weight: 800; display: flex; gap: 6px; align-items: center; }
+  .opt.ok { background: linear-gradient(135deg, #34c77b, #20a6a0); border-color: transparent; }
+  .fly { position: absolute; z-index: 5; }
+  .dock { position: absolute; left: 10px; right: 10px; bottom: 10px; border-radius: 999px; background: rgba(255,255,255,.2); border: 1px solid rgba(255,255,255,.5);
+    display: flex; align-items: center; justify-content: center; z-index: 4; }
+  .next { border-radius: 999px; font-weight: 800; letter-spacing: .06em; background: linear-gradient(135deg, #36d1f0, #5a4ff0); box-shadow: 0 6px 16px rgba(74,110,245,.6); }
+  .banner { left: 50%; padding: 12px 20px; border-radius: 22px; background: rgba(255,255,255,.95); color: #4a4ff0; font-weight: 800; white-space: nowrap;
+    box-shadow: 0 16px 40px rgba(20,20,110,.35); z-index: 6; }
+  .stamps { left: 0; right: 0; display: flex; justify-content: center; gap: 10px; }
+  .stamp { width: 62px; height: 62px; border-radius: 18px; background: rgba(255,255,255,.95); display: grid; place-items: center; font-size: 34px;
+    box-shadow: 0 10px 24px rgba(20,20,110,.3); }
+  .cta { left: 50%; padding: 15px 32px; border-radius: 999px; background: #fff; color: #4a74f5; font-weight: 800; white-space: nowrap;
+    box-shadow: 0 14px 34px rgba(20,20,110,.35); display: flex; align-items: center; gap: 10px; }
+  .cta svg { width: 24px; height: 24px; }
+  .tag { left: 0; right: 0; text-align: center; font-weight: 700; opacity: .95; }
+</style></head>
+<body>
+  <div class="blob" style="width:420px;height:420px;right:-160px;top:-170px"></div>
+  <div class="blob" style="width:320px;height:320px;left:-140px;bottom:-150px;opacity:.7"></div>
+  <div class="abs brand" id="brand"><img src="../logo.svg" alt="">aura</div>
+  <h1 class="abs" id="h1"></h1>
+  <div class="abs phone" id="phone">
+    <div class="peer" id="peerA"><div class="face" id="faceA"></div></div>
+    <div class="peer" id="peerB"><div class="face" id="faceB"></div></div>
+    <div class="me" id="me">🙂</div>
+    <div class="chip" id="chip"></div>
+    <div class="opts" id="opts"></div>
+    <div class="dock" id="dock"><span class="next" id="next"></span></div>
+  </div>
+  <div class="abs banner" id="banner"></div>
+  <div class="abs stamps" id="stamps"></div>
+  <div class="abs tag" id="tag"></div>
+  <div class="abs cta" id="cta"><svg viewBox="0 0 24 24" fill="#4a74f5"><path d="M21.4 4.3 2.9 11.4c-1.3.5-1.3 1.2-.2 1.6l4.7 1.5 1.8 5.6c.2.6.1.9.8.9.5 0 .7-.2 1-.5l2.3-2.2 4.7 3.5c.9.5 1.5.2 1.7-.8l3.1-14.7c.3-1.3-.5-1.9-1.4-1.5Z"/></svg><span id="ctaText"></span></div>
+<script>
+  const L = {
+    ru: { h1: 'Видеочат со всем миром', guess: '🎯 Угадай, откуда он', ok: '🎯 В точку! +10 aura', next: 'ДАЛЕЕ', vibe: '✨ Взаимный вайб!',
+      passport: '🛂 Собирай страны в паспорт', tag: 'Один свайп — новый собеседник', cta: 'Открыть в Telegram',
+      c: { BR: 'Бразилия', DE: 'Германия', JP: 'Япония', MX: 'Мексика', KZ: 'Казахстан', ES: 'Испания' } },
+    en: { h1: 'Video chat with the whole world', guess: '🎯 Guess where they’re from', ok: '🎯 Nailed it! +10 aura', next: 'NEXT', vibe: '✨ Mutual vibe!',
+      passport: '🛂 Collect countries in your passport', tag: 'One swipe — a new person', cta: 'Open in Telegram',
+      c: { BR: 'Brazil', DE: 'Germany', JP: 'Japan', MX: 'Mexico', KZ: 'Kazakhstan', ES: 'Spain' } },
+    es: { h1: 'Videochat con todo el mundo', guess: '🎯 Adivina de dónde es', ok: '🎯 ¡Acertaste! +10 aura', next: 'SIGUIENTE', vibe: '✨ ¡Vibe mutuo!',
+      passport: '🛂 Colecciona países en tu pasaporte', tag: 'Un deslizamiento — otra persona', cta: 'Abrir en Telegram',
+      c: { BR: 'Brasil', DE: 'Alemania', JP: 'Japón', MX: 'México', KZ: 'Kazajistán', ES: 'España' } },
+    de: { h1: 'Videochat mit der ganzen Welt', guess: '🎯 Rate, woher er kommt', ok: '🎯 Richtig! +10 Aura', next: 'WEITER', vibe: '✨ Gegenseitiger Vibe!',
+      passport: '🛂 Sammle Länder im Pass', tag: 'Ein Wisch — eine neue Person', cta: 'In Telegram öffnen',
+      c: { BR: 'Brasilien', DE: 'Deutschland', JP: 'Japan', MX: 'Mexiko', KZ: 'Kasachstan', ES: 'Spanien' } },
+    pt: { h1: 'Videochat com o mundo inteiro', guess: '🎯 Adivinhe de onde é', ok: '🎯 Acertou! +10 aura', next: 'PRÓXIMO', vibe: '✨ Vibe mútua!',
+      passport: '🛂 Junte países no passaporte', tag: 'Um deslize — uma nova pessoa', cta: 'Abrir no Telegram',
+      c: { BR: 'Brasil', DE: 'Alemanha', JP: 'Japão', MX: 'México', KZ: 'Cazaquistão', ES: 'Espanha' } },
+  };
+  const q = new URLSearchParams(location.search);
+  const d = L[q.get('lang')] || L.en;
+  const story = q.get('fmt') !== 'square';
+  document.body.className = story ? 'story' : 'square';
+  const $ = id => document.getElementById(id);
+  const flag = c => String.fromCodePoint(...[...c].map(x => 0x1F1E6 + x.charCodeAt(0) - 65));
+  $('h1').textContent = d.h1; $('next').textContent = d.next; $('ctaText').textContent = d.cta; $('tag').textContent = d.tag;
+
+  // Геометрия под формат
+  const G = story
+    ? { W: 540, H: 960, brandY: 50, h1Y: 110, h1Size: 44, phoneY: 250, pw: 300, ph: 460, face: 160, me: 40, chip: 15, opt: 14, dockH: 46, nextF: 14,
+        bannerY: 440, bannerF: 22, stampsY: 760, tagY: 750, tagF: 22, ctaY: 835, ctaF: 21 }
+    : { W: 540, H: 540, brandY: 18, h1Y: 64, h1Size: 30, phoneY: 116, pw: 220, ph: 330, face: 112, me: 30, chip: 12, opt: 11, dockH: 38, nextF: 12,
+        bannerY: 250, bannerF: 18, stampsY: 300, tagY: 450, tagF: 17, ctaY: 455, ctaF: 17 };
+  Object.assign($('brand').style, { top: G.brandY + 'px' });
+  Object.assign($('h1').style, { top: G.h1Y + 'px', fontSize: G.h1Size + 'px' });
+  Object.assign($('phone').style, { top: G.phoneY + 'px', width: G.pw + 'px', height: G.ph + 'px', marginLeft: -G.pw / 2 + 'px' });
+  $('me').style.fontSize = G.me + 'px';
+  Object.assign($('chip').style, { left: '10px', top: '12px', fontSize: G.chip + 'px' });
+  Object.assign($('opts').style, { bottom: (G.dockH + 22) + 'px' });
+  Object.assign($('dock').style, { height: G.dockH + 'px' });
+  Object.assign($('next').style, { fontSize: G.nextF + 'px', padding: `${G.nextF * 0.55}px ${G.nextF * 1.6}px` });
+  Object.assign($('banner').style, { top: G.bannerY + 'px', fontSize: G.bannerF + 'px' });
+  Object.assign($('stamps').style, { top: G.stampsY + 'px' });
+  Object.assign($('tag').style, { top: G.tagY + 'px', fontSize: G.tagF + 'px' });
+  Object.assign($('cta').style, { top: G.ctaY + 'px', fontSize: G.ctaF + 'px' });
+
+  const PEERS = [
+    { face: '😄', bg: 'linear-gradient(160deg, #ffb37a, #ff6f91 55%, #8a5cf6)', c: 'BR' },
+    { face: '😎', bg: 'linear-gradient(160deg, #7cf29c, #20a6a0 55%, #2563eb)', c: 'DE' },
+    { face: '🥳', bg: 'linear-gradient(160deg, #ffd166, #ff8a5b 55%, #e5446d)', c: 'JP' },
+  ];
+  const OPTS = ['BR', 'MX', 'KZ', 'ES'];
+  $('opts').innerHTML = OPTS.map(c => `<div class="opt" data-c="${c}" style="font-size:${G.opt}px"><span>${flag(c)}</span>${d.c[c]}</div>`).join('');
+  $('stamps').innerHTML = ['BR', 'DE', 'JP'].map(c => `<div class="stamp">${flag(c)}</div>`).join('');
+
+  // Плавности
+  const clamp = (v, a = 0, b = 1) => Math.min(b, Math.max(a, v));
+  const seg = (t, a, b) => clamp((t - a) / (b - a));
+  const easeOut = x => 1 - Math.pow(1 - x, 3);
+  const back = x => { const c = 1.7; return 1 + (c + 1) * Math.pow(x - 1, 3) + c * Math.pow(x - 1, 2); };
+  const show = (el, o, extra = '') => { el.style.opacity = o; el.style.transform = extra; };
+
+  // Летящие реакции
+  const FLY = [];
+  for (let i = 0; i < 9; i++) {
+    const e = document.createElement('div'); e.className = 'fly'; e.textContent = ['❤️', '🔥', '😂'][i % 3];
+    e.style.fontSize = (story ? 34 : 26) + 'px'; $('phone').append(e);
+    FLY.push({ e, start: 4.0 + i * 0.22, x: 18 + (i * 37) % 60, drift: ((i * 53) % 40) - 20 });
+  }
+
+  function peerStyle(el, faceEl, p) { el.style.background = p.bg; faceEl.textContent = p.face; faceEl.style.fontSize = G.face + 'px'; }
+
+  window.render = t => {
+    // 0–1 с: заставка
+    const intro = easeOut(seg(t, 0, 0.7));
+    show($('brand'), intro, `translateY(${(1 - intro) * -20}px)`);
+    show($('h1'), easeOut(seg(t, 0.15, 0.9)), `translateY(${(1 - easeOut(seg(t, 0.15, 0.9))) * 20}px)`);
+    const ph = back(seg(t, 0.4, 1.2));
+    show($('phone'), clamp(ph * 2), `translateY(${(1 - ph) * 80}px) scale(${0.9 + 0.1 * ph})`);
+
+    // Собеседники: 0–3.2 первый, свайп 3.2–3.7 → второй, свайп 6.6–7.1 → третий
+    const swipe1 = easeOut(seg(t, 3.2, 3.7)), swipe2 = easeOut(seg(t, 6.6, 7.1));
+    const cur = t < 3.7 ? 0 : t < 7.1 ? 1 : 2;
+    const swiping = t >= 3.2 && t < 3.7 ? swipe1 : t >= 6.6 && t < 7.1 ? swipe2 : 0;
+    const out = Math.min(cur + (swiping > 0 ? 0 : 0), 2);
+    peerStyle($('peerA'), $('faceA'), PEERS[t >= 3.2 && t < 3.7 ? 0 : t >= 6.6 && t < 7.1 ? 1 : out]);
+    peerStyle($('peerB'), $('faceB'), PEERS[t >= 3.2 && t < 3.7 ? 1 : t >= 6.6 && t < 7.1 ? 2 : out]);
+    $('peerA').style.transform = `translateX(${-swiping * 115}%) rotate(${-swiping * 10}deg)`;
+    $('peerA').style.zIndex = 2; $('peerB').style.zIndex = 1;
+    $('peerB').style.opacity = swiping > 0 ? 1 : 0;
+    // «Далее» нажимается перед свайпом
+    const press = Math.max(1 - Math.abs(t - 3.1) * 6, 1 - Math.abs(t - 6.5) * 6, 0);
+    $('next').style.transform = `scale(${1 - press * 0.12})`;
+
+    // «Угадай»: 1.4–3.1 с, верный ответ на 2.4 с
+    const g = t >= 1.4 && t < 3.15;
+    const gIn = easeOut(seg(t, 1.4, 1.8));
+    show($('opts'), g ? gIn : 0, `translateY(${(1 - gIn) * -10}px)`);
+    for (const o of $('opts').children) o.classList.toggle('ok', o.dataset.c === 'BR' && t >= 2.4);
+    // Чип: подсказка → ответ → страна второго → вайб
+    const chip = $('chip');
+    if (t < 1.4) show(chip, 0);
+    else if (t < 2.4) { chip.textContent = d.guess; show(chip, gIn); }
+    else if (t < 3.2) { chip.textContent = d.ok; show(chip, 1, `scale(${1 + 0.15 * Math.max(0, 1 - (t - 2.4) * 4)})`); }
+    else if (t < 3.9) show(chip, 0);
+    else if (t < 7.1) { chip.textContent = `${flag('DE')} ${d.c.DE}`; show(chip, easeOut(seg(t, 3.9, 4.2))); }
+    else { chip.textContent = `${flag('JP')} ${d.c.JP}`; show(chip, easeOut(seg(t, 7.3, 7.6))); }
+
+    // Реакции 4.0–6.3
+    for (const f of FLY) {
+      const k = seg(t, f.start, f.start + 1.6);
+      const on = k > 0 && k < 1;
+      f.e.style.opacity = on ? (k < 0.15 ? k / 0.15 : 1 - Math.max(0, (k - 0.7) / 0.3)) : 0;
+      f.e.style.left = f.x + '%';
+      f.e.style.bottom = (G.dockH + 20 + k * G.ph * 0.6) + 'px';
+      f.e.style.transform = `translateX(${f.drift * k}px) scale(${0.6 + 0.6 * easeOut(Math.min(1, k * 3))})`;
+    }
+
+    // Вайб 5.4–6.4
+    const vb = $('banner');
+    const vIn = back(seg(t, 5.4, 5.8)), vOut = seg(t, 6.2, 6.5);
+    vb.textContent = d.vibe;
+    show(vb, t >= 5.4 && t < 6.5 ? 1 - vOut : 0, `translateX(-50%) scale(${0.6 + 0.4 * vIn})`);
+
+    // Паспорт 7.8–9.6 (штампы над телефоном в квадрате, под ним — в вертикали)
+    const st = $('stamps');
+    st.style.opacity = t >= 7.8 && t < 9.7 ? 1 - seg(t, 9.4, 9.7) : 0;
+    [...st.children].forEach((s, i) => { const k = back(seg(t, 7.9 + i * 0.25, 8.3 + i * 0.25)); s.style.transform = `scale(${k}) rotate(${(1 - k) * -20}deg)`; });
+    if (t >= 7.8 && t < 9.7) { vb.textContent = d.passport; show(vb, 1 - seg(t, 9.4, 9.7), `translateX(-50%) scale(${0.6 + 0.4 * back(seg(t, 7.8, 8.2))})`); }
+
+    // Финал 9.7–12: подпись и кнопка, телефон уезжает чуть вверх
+    const fin = easeOut(seg(t, 9.7, 10.3));
+    if (!story) show($('phone'), clamp(ph * 2) * (1 - fin * 0.85), `translateY(${-fin * 30}px) scale(${1 - fin * 0.1})`);
+    show($('tag'), story ? (t >= 9.7 ? fin : 0) : (t >= 9.7 ? fin : 0), `translateY(${(1 - fin) * 16}px)`);
+    if (!story) $('tag').style.top = (G.tagY - 60) + 'px';
+    const pulse = t > 10.4 ? 1 + 0.05 * Math.sin((t - 10.4) * 6) : 1;
+    show($('cta'), t >= 9.9 ? easeOut(seg(t, 9.9, 10.4)) : 0, `translateX(-50%) scale(${(0.8 + 0.2 * back(seg(t, 9.9, 10.4))) * pulse})`);
+  };
+  render(Number(q.get('t') || 5));
+</script>
+</body></html>

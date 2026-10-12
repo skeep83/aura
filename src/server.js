@@ -364,6 +364,25 @@ async function onStoryUpload(req, res) {
   }
 }
 
+// Посадочная страница рекламы (/go?c=…): просмотр и клик «Открыть в Telegram». Без cookies и личных данных.
+const landingHits = new Map(); // ip -> { n, reset }
+async function onLanding(req, res) {
+  const ip = String(req.headers['cf-connecting-ip'] || req.socket.remoteAddress || '');
+  const now = Date.now();
+  const h = landingHits.get(ip);
+  if (h && now < h.reset && h.n >= 20) { res.writeHead(429); return res.end(); }
+  landingHits.set(ip, h && now < h.reset ? { n: h.n + 1, reset: h.reset } : { n: 1, reset: now + 60_000 });
+  if (landingHits.size > 50_000) landingHits.clear();
+  let body = '';
+  try { for await (const c of req) { body += c; if (body.length > 500) throw new Error('big'); } } catch { res.writeHead(413); return res.end(); }
+  try {
+    const { c, ev } = JSON.parse(body);
+    const code = String(c || '').replace(/[^\w-]/g, '').slice(0, 40);
+    if (code && (ev === 'view' || ev === 'click')) db.event(`landing_${ev}`, '', 0, `ad_${code}`);
+  } catch {}
+  res.writeHead(204); res.end();
+}
+
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, 'http://x');
   if (url.pathname === '/healthz') {
@@ -373,6 +392,7 @@ const server = http.createServer((req, res) => {
     });
   }
   if (url.pathname === '/api/story' && req.method === 'POST') return onStoryUpload(req, res);
+  if (url.pathname === '/api/landing' && req.method === 'POST') return onLanding(req, res);
   if (url.pathname.startsWith('/api/admin/')) {
     admin.handle(req, res, url).catch(e => { console.error('admin:', e.message); if (!res.headersSent) { res.writeHead(500); res.end(); } });
     return;
