@@ -33,6 +33,7 @@
         <a data-page="payments"><i>⭐</i>Платежи</a>
         <a data-page="moderation"><i>🛡</i>Модерация</a>
         <a data-page="rooms"><i>📢</i>Комнаты</a>
+        <a data-page="ai"><i>✨</i>ИИ</a>
         <a data-page="system"><i>⚙</i>Система</a>
       </nav>
       <div class="side-foot">
@@ -103,6 +104,42 @@
 
       <section class="page" id="page-rooms" hidden>
         <div class="card flush"><table class="table" id="rooms-table"></table></div>
+      </section>
+
+      <section class="page" id="page-ai" hidden>
+        <div class="grid2">
+          <form class="card ai-form" id="ai-form" autocomplete="off">
+            <div class="card-head"><h3>Провайдер</h3><label class="switch"><input type="checkbox" id="ai-enabled"><span></span><b id="ai-enabled-label">Выключен</b></label></div>
+            <label>Сервис<select id="ai-preset"></select></label>
+            <label>Адрес API<input id="ai-base" placeholder="https://…/v1"></label>
+            <label>Модель<input id="ai-model" placeholder="например, claude-haiku-5-5"></label>
+            <label>API-ключ<input id="ai-key" type="password" placeholder="не меняется, если оставить пустым" autocomplete="new-password"></label>
+            <p class="muted small" id="ai-key-state"></p>
+            <label>Лимит запросов в сутки<input id="ai-limit" type="number" min="10" step="10"></label>
+            <h3 style="margin-top:8px">Что делает ИИ</h3>
+            <div id="ai-features" class="checks"></div>
+            <div class="actions">
+              <button class="btn primary" type="submit">Сохранить</button>
+              <button class="btn ghost" type="button" id="ai-test">Проверить связь</button>
+              <button class="btn danger sm" type="button" id="ai-clear-key">Удалить ключ</button>
+            </div>
+            <p class="muted small" id="ai-test-result"></p>
+          </form>
+          <div class="card">
+            <h3>ИИ-аналитик</h3>
+            <p class="muted small">Спросите про метрики — ответ строится на данных за 30 дней.</p>
+            <div class="chips-row" id="ai-suggest">
+              <button class="tag" data-q="Что сейчас главное узкое место роста и что сделать в первую очередь?">Узкое место роста</button>
+              <button class="tag" data-q="Почему люди уходят после первого разговора? Разбери воронку и удержание.">Почему уходят</button>
+              <button class="tag" data-q="Как работают вирусные фичи за неделю и какую усилить?">Вирусные фичи</button>
+              <button class="tag" data-q="Есть ли проблемы с качеством соединения и безопасностью?">Качество и безопасность</button>
+            </div>
+            <div class="ai-chat" id="ai-chat"></div>
+            <form class="ai-ask" id="ai-ask"><textarea id="ai-question" placeholder="Ваш вопрос…" rows="2"></textarea><button class="btn primary" type="submit">Спросить</button></form>
+            <h3 style="margin-top:18px">Расход за сегодня</h3>
+            <table class="kv" id="ai-usage"></table>
+          </div>
+        </div>
       </section>
 
       <section class="page" id="page-system" hidden>

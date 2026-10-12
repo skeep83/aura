@@ -94,6 +94,7 @@
   let freePerDay = 10;
   let maskOn = store.get('maskDefault') === '1';
   let invoiceKind = 'premium';
+  let aiFeatures = {};
   let wrappedShown = false;
 
   // Языки: флаг и самоназвание
@@ -148,7 +149,7 @@
   // ---------- Камера ----------
   async function startCamera() {
     localStream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: facing, width: { ideal: 720 }, height: { ideal: 960 }, frameRate: { ideal: 24, max: 30 } },
+      video: { facingMode: facing, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30, max: 30 } },
       audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
     });
     el.local.srcObject = localStream;
@@ -158,7 +159,7 @@
   async function flipCamera() {
     const want = facing === 'user' ? 'environment' : 'user';
     try {
-      const s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: want } });
+      const s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: want, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30, max: 30 } } });
       const track = s.getVideoTracks()[0];
       const old = localStream.getVideoTracks()[0];
       localStream.removeTrack(old);
@@ -234,6 +235,7 @@
     for (const t of localStream.getTracks()) {
       pc.addTrack(t.kind === 'video' && maskOn ? mask.track : t, localStream);
     }
+    tuneSenders(pc);
 
     pc.ontrack = e => {
       if (el.remote.srcObject !== e.streams[0]) el.remote.srcObject = e.streams[0];
@@ -268,9 +270,39 @@
     connectTimer = setTimeout(() => { if (state === 'connecting') reportConn(false, 'timeout').finally(next); }, 15_000);
 
     if (initiator) {
-      await pc.setLocalDescription(await pc.createOffer());
+      await pc.setLocalDescription(tuneSdp(await pc.createOffer()));
       send({ t: 'signal', data: { sdp: pc.localDescription } });
     }
+  }
+
+  // Качество: до 2,5 Мбит/с и 30 к/с для видео, приоритет медиа в сети, голос 64 кбит/с
+  async function tuneSenders(p) {
+    for (const sender of p.getSenders()) {
+      const kind = sender.track?.kind;
+      if (!kind) continue;
+      try {
+        const params = sender.getParameters();
+        params.encodings = params.encodings?.length ? params.encodings : [{}];
+        const e = params.encodings[0];
+        if (kind === 'video') {
+          e.maxBitrate = 2_500_000;
+          e.maxFramerate = 30;
+          e.scaleResolutionDownBy = 1;
+          params.degradationPreference = 'balanced';
+        } else {
+          e.maxBitrate = 64_000;
+        }
+        e.priority = 'high';
+        e.networkPriority = 'high';
+        await sender.setParameters(params);
+      } catch {}
+    }
+  }
+  // Opus: устойчивость к потерям (FEC), моно, 48 кбит/с — разборчивее на мобильной сети
+  function tuneSdp(desc) {
+    const sdp = desc.sdp.replace(/a=fmtp:(\d+) (.*minptime=\d+.*)/g, (line, pt, rest) =>
+      /useinbandfec/.test(rest) ? line : `a=fmtp:${pt} ${rest};useinbandfec=1;stereo=0;maxaveragebitrate=48000`);
+    return { type: desc.type, sdp };
   }
 
   // Обезличенная диагностика соединения: только итог и типы маршрутов (host/srflx/relay), без IP-адресов
@@ -300,7 +332,7 @@
       if (data.sdp) {
         await pc.setRemoteDescription(data.sdp);
         if (data.sdp.type === 'offer') {
-          await pc.setLocalDescription(await pc.createAnswer());
+          await pc.setLocalDescription(tuneSdp(await pc.createAnswer()));
           send({ t: 'signal', data: { sdp: pc.localDescription } });
         }
         for (const c of pendingCandidates) await pc.addIceCandidate(c);
@@ -363,6 +395,7 @@
         appName = msg.appName || appName;
         emojiStatusId = msg.emojiStatusId;
         freePerDay = msg.freeFilterPerDay ?? freePerDay;
+        aiFeatures = msg.ai || {};
         window.AuraI18n.setApp(appName);
         setMe(msg.me);
         setOnline(msg.online);
@@ -387,6 +420,15 @@
         break;
       case 'signal': onSignal(msg.data); break;
       case 'chat': addMessage(msg.text, 'them'); haptic('soft'); break;
+      case 'chat_masked': if (msg.reason === 'contact') toast(t('chat_masked'), 3500); break;
+      case 'chat_blocked':
+        toast(t(msg.reason === 'spam' ? 'chat_spam' : 'chat_blocked', { n: msg.strikes, max: msg.max }), 4500);
+        haptic('warning');
+        el.messages.lastElementChild?.classList.contains('me') && el.messages.lastElementChild.classList.add('blocked');
+        break;
+      case 'translated': onTranslated(msg); break;
+      case 'ai_topic_fail': games.aiTopicFailed(); break;
+      case 'wrapped_line': if (msg.text) { $('arch-desc').textContent = msg.text; } break;
       case 'peer_left':
         closePeer();
         state = 'waiting';
@@ -808,6 +850,7 @@
     isTalking: () => state === 'talking', getRawVideo: () => el.selfBg,
     getLang: () => (peerInfo?.langs?.includes('ru') ? 'ru' : peerInfo?.langs?.[0] || myLangs[0]),
     onResult: shareStory,
+    requestAiTopic: () => { if (!aiFeatures.icebreakers) return false; send({ t: 'ai_topic' }); return true; },
   });
   $('games-btn').onclick = () => {
     if (duo.active) return toast(t('duo_only_1v1'));
@@ -1191,7 +1234,7 @@
   // ---------- Aura Wrapped: итоги недели ----------
   const ARCH = { traveler: '🧭', magnet: '🧲', soul: '🎉', voice: '🎙️', thinker: '🧠', warm: '💛', sunny: '☀️', tireless: '⚡', newbie: '🌱' };
   let wrappedData = null;
-  function openWrapped() { send({ t: 'wrapped' }); }
+  function openWrapped() { send({ t: 'wrapped', lang: LOCALE }); }
   function renderWrapped(w) {
     wrappedData = w;
     $('arch-emoji').textContent = ARCH[w.archetype] || '✨';
@@ -1346,13 +1389,52 @@
   }
 
   // ---------- Чат ----------
+  let msgSeq = 0;
+  const fadeLater = (m, ms) => { clearTimeout(m._fade); m._fade = setTimeout(() => { m.classList.add('fade'); setTimeout(() => m.remove(), 600); }, ms); };
   function addMessage(text, who) {
     const m = document.createElement('div');
     m.className = `msg ${who}`;
     m.textContent = text;
+    // Сообщение собеседника можно перевести нажатием (ИИ)
+    if (who === 'them' && aiFeatures.translate) {
+      m.classList.add('tr');
+      m.dataset.id = String(++msgSeq);
+      m.dataset.orig = text;
+      m.onclick = () => translateMessage(m);
+    }
     el.messages.append(m);
     while (el.messages.children.length > 5) el.messages.firstChild.remove();
-    setTimeout(() => { m.classList.add('fade'); setTimeout(() => m.remove(), 600); }, 12_000);
+    fadeLater(m, 12_000);
+  }
+  function translateMessage(m) {
+    if (m.dataset.state === 'done') { // повторное нажатие — оригинал/перевод
+      const showOrig = m.dataset.view !== 'orig';
+      m.textContent = showOrig ? m.dataset.orig : m.dataset.tr;
+      m.dataset.view = showOrig ? 'orig' : 'tr';
+      fadeLater(m, 20_000);
+      return;
+    }
+    if (m.dataset.state === 'busy') return;
+    m.dataset.state = 'busy';
+    m.classList.add('busy');
+    fadeLater(m, 20_000);
+    send({ t: 'translate', id: m.dataset.id, text: m.dataset.orig, lang: LOCALE });
+    haptic();
+  }
+  function onTranslated(msg) {
+    const m = el.messages.querySelector(`.msg[data-id="${CSS.escape(String(msg.id))}"]`);
+    if (!m) return;
+    m.classList.remove('busy');
+    if (!msg.text) {
+      m.dataset.state = '';
+      return toast(t(msg.error === 'limit' ? 'translate_limit' : 'translate_fail'));
+    }
+    m.dataset.state = 'done';
+    m.dataset.tr = msg.text;
+    m.dataset.view = 'tr';
+    m.textContent = msg.text;
+    m.classList.add('translated');
+    fadeLater(m, 20_000);
   }
   function clearMessages() { el.messages.replaceChildren(); }
 

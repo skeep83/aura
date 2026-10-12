@@ -1,7 +1,7 @@
 // Игры в звонке. Логика на клиентах, сервер только пересылает сообщения {t:'game', data} собеседнику.
 // Протокол data.g: topic | invite | accept | decline | rps | nl_lost
 window.AuraGames = {
-  create({ send, toast, haptic, layer, isTalking, getRawVideo, getLang, onResult }) {
+  create({ send, toast, haptic, layer, isTalking, getRawVideo, getLang, onResult, requestAiTopic }) {
     const { t } = window.AuraI18n;
     const TOPICS = {
       ru: [
@@ -49,18 +49,30 @@ window.AuraGames = {
     }
 
     // ---------- Тема для разговора ----------
-    function showTopic(i) {
-      const list = TOPICS[getLang() === 'ru' ? 'ru' : 'en'];
+    function showTopicText(text, ai = false) {
       clearTimeout(topicTimer);
-      show(card(t('topic_title'), list[i % list.length], [[t('more_topic'), () => sendTopic(), 'go'], [t('hide'), clear]]));
+      show(card(ai ? `✨ ${t('topic_title')}` : t('topic_title'), text, [[t('more_topic'), () => sendTopic(), 'go'], [t('hide'), clear]]));
       topicTimer = setTimeout(clear, 25_000);
     }
-    function sendTopic() {
+    function showTopic(i) {
+      const list = TOPICS[getLang() === 'ru' ? 'ru' : 'en'];
+      showTopicText(list[i % list.length]);
+    }
+    // Своя тема из списка — запасной вариант, если ИИ выключен или не ответил
+    function sendStaticTopic() {
       const i = Math.floor(Math.random() * 1000);
       send({ g: 'topic', i });
       showTopic(i);
-      haptic();
     }
+    let aiWait = null;
+    function sendTopic() {
+      haptic();
+      if (!requestAiTopic?.()) return sendStaticTopic();
+      show(card(`✨ ${t('topic_title')}`, t('topic_thinking')));
+      clearTimeout(aiWait);
+      aiWait = setTimeout(sendStaticTopic, 6000);
+    }
+    function aiTopicFailed() { clearTimeout(aiWait); sendStaticTopic(); }
 
     // ---------- Камень-ножницы-бумага: до двух побед ----------
     function rpsStart() {
@@ -180,6 +192,7 @@ window.AuraGames = {
     function onMessage(d) {
       switch (d.g) {
         case 'topic': showTopic(Number(d.i) || 0); break;
+        case 'topic_text': clearTimeout(aiWait); if (typeof d.text === 'string') showTopicText(d.text.slice(0, 200), true); break;
         case 'invite':
           if (!NAMES[d.game]) return;
           haptic('medium');
@@ -206,8 +219,8 @@ window.AuraGames = {
       }
     }
 
-    function reset() { game = null; clearTimeout(topicTimer); clear(); }
+    function reset() { game = null; clearTimeout(topicTimer); clearTimeout(aiWait); clear(); }
 
-    return { start, onMessage, reset };
+    return { start, onMessage, reset, aiTopicFailed };
   },
 };

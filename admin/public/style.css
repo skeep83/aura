@@ -182,3 +182,26 @@ nav .badge { margin-left: auto; min-width: 22px; height: 20px; padding: 0 6px; b
   .grid2, .grid3 { grid-template-columns: 1fr; }
   .table th:nth-child(n+5), .table td:nth-child(n+5) { display: none; }
 }
+
+/* ИИ */
+.ai-form { display: flex; flex-direction: column; gap: 10px; }
+.ai-form label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; font-weight: 700; color: var(--muted); }
+.ai-form input:not([type=checkbox]), .ai-form select, .ai-ask textarea { height: 40px; padding: 0 14px; border-radius: 12px; border: 1px solid var(--line); background: var(--bg2); outline: none; color: var(--text); font-weight: 600; }
+.ai-form input:focus, .ai-ask textarea:focus { border-color: #4a86f7; }
+.checks { display: flex; flex-direction: column; gap: 8px; }
+.checks label { flex-direction: row; align-items: flex-start; gap: 10px; font-weight: 600; color: var(--text); font-size: 13px; }
+.checks input { margin-top: 3px; accent-color: #4a86f7; }
+.switch { display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 12px; }
+.switch input { display: none; }
+.switch span { width: 42px; height: 24px; border-radius: 99px; background: var(--hover); border: 1px solid var(--line); position: relative; transition: background .2s; }
+.switch span::after { content: ''; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%; background: #fff; transition: transform .2s; }
+.switch input:checked + span { background: var(--grad); border-color: transparent; }
+.switch input:checked + span::after { transform: translateX(18px); }
+.ai-chat { display: flex; flex-direction: column; gap: 10px; max-height: 420px; overflow-y: auto; margin: 12px 0; }
+.ai-chat .q { align-self: flex-end; max-width: 85%; padding: 10px 14px; border-radius: 14px 14px 4px 14px; background: var(--grad); color: #fff; }
+.ai-chat .a { align-self: flex-start; max-width: 95%; padding: 12px 14px; border-radius: 14px 14px 14px 4px; background: var(--hover); border: 1px solid var(--line); white-space: pre-wrap; }
+.ai-chat .a.busy { opacity: .6; }
+.ai-ask { display: flex; gap: 8px; align-items: flex-end; }
+.ai-ask textarea { flex: 1; height: auto; min-height: 44px; padding: 10px 14px; resize: vertical; font: inherit; }
+.chips-row .tag { cursor: pointer; border: 1px solid var(--line); }
+.ai-review { margin-top: 10px; padding: 12px 14px; border-radius: 14px; background: var(--hover); border: 1px solid var(--line); white-space: pre-wrap; font-size: 13px; }

@@ -13,6 +13,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 // Фейковый сервис модерации: кадр 'NSFW' — нарушение
 async function fakeModeration() {
   const srv = http.createServer((req, res) => {
+    if (req.url === '/healthz') { res.writeHead(200); return res.end('{"ok":true}'); }
     let body = '';
     req.on('data', c => { body += c; });
     req.on('end', () => {
@@ -373,4 +374,44 @@ test('админ-API: без токена закрыт, с токеном — о
   assert.ok(s.at(-1).matches >= 1);
   assert.equal((await call('users/nope/ban', { method: 'POST', body: {} })).status, 400);
   b.ws.close();
+});
+
+test('чат: ссылки и контакты скрываются, тяжёлое не доставляется, 3 нарушения — бан', async t => {
+  const port = await startServer(t);
+  const a = await client(port, 'dev-chat-a'), b = await client(port, 'dev-chat-b');
+  a.send({ t: 'find' }); b.send({ t: 'find' });
+  await a.next('matched'); await b.next('matched');
+  a.send({ t: 'chat', text: 'пиши мне @kate_super или t.me/kate' });
+  assert.equal((await b.next('chat')).text, 'пиши мне @••• или 🔗•••');
+  assert.equal((await a.next('chat_masked')).reason, 'contact');
+  for (let i = 1; i <= 2; i++) {
+    await sleep(450);
+    a.send({ t: 'chat', text: 'скинь нюдсы' });
+    assert.equal((await a.next('chat_blocked')).strikes, i);
+  }
+  await sleep(450);
+  a.send({ t: 'chat', text: 'скинь нюдсы' });
+  await a.next('banned');
+  await assert.rejects(b.next('chat'));
+  b.ws.close();
+});
+
+test('модерация: без кадров камеры разговор прерывается', async t => {
+  const mod = await fakeModeration();
+  t.after(() => mod.close());
+  const port = await startServer(t, {
+    MODERATION_URL: `http://127.0.0.1:${mod.address().port}`, MODERATION_TOKEN: 'mod-secret',
+    FRAME_GRACE_MS: '800', FRAME_MAX_GAP_MS: '600', FRAME_INTERVAL_MS: '100',
+  });
+  await sleep(300); // первая проверка здоровья модерации
+  const ok = await client(port, 'dev-fr-ok'), silent = await client(port, 'dev-fr-silent');
+  ok.send({ t: 'find' }); silent.send({ t: 'find' });
+  await ok.next('matched');
+  const timer = setInterval(() => ok.send({ t: 'frame', jpg: 'x'.repeat(2000) }), 150);
+  t.after(() => clearInterval(timer));
+  assert.equal((await silent.next('error')).code, 'no_frames');
+  await silent.next('stopped');
+  assert.equal((await ok.next('peer_left')).reason, 'moderation');
+  clearInterval(timer);
+  ok.ws.close(); silent.ws.close();
 });

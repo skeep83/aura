@@ -15,6 +15,8 @@ import { StoryStore } from './stories.js';
 import { note } from './bot-profile.js';
 import { DuoManager } from './duo.js';
 import { createAdmin } from './admin.js';
+import { ChatFilter } from './chatfilter.js';
+import { createAI } from './ai.js';
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const PUBLIC_DIR = path.join(ROOT, 'public');
@@ -77,6 +79,10 @@ const moderation = new Moderation({
   url: env.MODERATION_URL, token: env.MODERATION_TOKEN || '', threshold: Number(env.NSFW_THRESHOLD || 0.85),
   minorThreshold: Number(env.MINOR_THRESHOLD || 0.8),
 });
+const chatFilter = new ChatFilter();
+const ai = createAI({ db });
+const FRAME_GRACE_MS = Number(env.FRAME_GRACE_MS || 25_000);  // после начала разговора кадры обязательны
+const FRAME_MAX_GAP_MS = Number(env.FRAME_MAX_GAP_MS || 20_000); // дольше без кадра — разговор прерывается (модифицированный клиент или камера выключена)
 const schedule = new EventSchedule({
   time: env.EVENT_TIME || '21:00', tzOffsetHours: cfg.tzOffset,
   minutes: Number(env.EVENT_MINUTES || 60), roundSeconds: Number(env.ROUND_SECONDS || 180),
@@ -281,7 +287,7 @@ function kick(id, banned = true) {
 
 // Админ-API для панели на TrueNAS (/api/admin/*, Bearer ADMIN_API_TOKEN)
 const admin = createAdmin({
-  db, token: env.ADMIN_API_TOKEN || '',
+  db, ai, token: env.ADMIN_API_TOKEN || '',
   cfg: {
     ...cfg, moderationUrl: env.MODERATION_URL || '', nsfwThreshold: Number(env.NSFW_THRESHOLD || 0.85),
     minorThreshold: Number(env.MINOR_THRESHOLD || 0.8),
@@ -352,7 +358,10 @@ async function onStoryUpload(req, res) {
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, 'http://x');
   if (url.pathname === '/healthz') {
-    return json(res, 200, { ok: true, online: clients.size, ...mm.stats(), moderation: moderation.enabled, event: eventInfo().active });
+    return json(res, 200, {
+      ok: true, online: clients.size, ...mm.stats(), moderation: moderation.enabled,
+      moderationUp: moderation.enabled ? moderation.up !== false : null, turn: Boolean(cfg.turnSecret || cfg.cfTurnKeyId), event: eventInfo().active,
+    });
   }
   if (url.pathname === '/api/story' && req.method === 'POST') return onStoryUpload(req, res);
   if (url.pathname.startsWith('/api/admin/')) {
@@ -379,7 +388,8 @@ wss.on('connection', (ws, req) => {
   // Страна пользователя — заголовок Cloudflare (через туннель и nginx)
   const country = String(req.headers['cf-ipcountry'] || '').toUpperCase().slice(0, 2);
   let client = null;
-  let lastNext = 0, lastChat = 0, lastFrame = 0, lastGame = 0, lastReact = 0;
+  let lastNext = 0, lastChat = 0, lastFrame = 0, lastGame = 0, lastReact = 0, lastTopic = 0;
+  const translations = []; // время переводов за последний час (лимит)
   ws.isAlive = true;
   ws.on('pong', () => { ws.isAlive = true; });
   const authTimer = setTimeout(() => ws.close(4001, 'auth timeout'), 10_000);
@@ -444,14 +454,16 @@ wss.on('connection', (ws, req) => {
       plans: Object.fromEntries(Object.entries(plans).map(([k, p]) => [k, { title: p.title, stars: p.stars, kind: p.kind || 'premium', count: p.count || 0 }])),
       payments: Boolean(bot) || cfg.devAnon, emojiStatusId: cfg.emojiStatusId || null,
       freeFilterPerDay: cfg.freeFilterPerDay, reactions: FREE_REACTIONS, compliments: COMPLIMENTS,
-      openWrapped: sp === 'wrapped',
+      openWrapped: sp === 'wrapped', ai: ai.clientFeatures(),
     });
   }
 
   async function onFrame(msg) {
     const now = Date.now();
+    if (typeof msg.jpg === 'string' && msg.jpg.length > 1000) client.lastFrameAt = now;
     if (!moderation.enabled || now - lastFrame < cfg.frameIntervalMs * 0.75) return;
     if (typeof msg.jpg !== 'string' || msg.jpg.length > 200_000 || (!mm.peerOf(client) && !duos.groupOf(client))) return;
+    client.lastFrameAt = now;
     lastFrame = now;
     const r = await moderation.score(msg.jpg);
     if (!r || clients.get(client.id) !== client) return;
@@ -530,6 +542,19 @@ wss.on('connection', (ws, req) => {
       if (target) target.tier = auraOf(db.user(t.id)).tier;
     }
     send({ t: 'rated' });
+  }
+
+  // Тяжёлое нарушение в чате: сообщение не доставлено, страйк; 3 за сутки — бан на сутки
+  function onChatViolation(reason, text) {
+    const now = Date.now();
+    client.chatStrikes = [...(client.chatStrikes || []).filter(t => now - t < DAY), now];
+    db.event('chat_block', client.id, client.chatStrikes.length, reason);
+    console.log(`chat block ${client.id} (${reason}) strikes=${client.chatStrikes.length}: ${text.slice(0, 60).replace(/\s+/g, ' ')}`);
+    if (client.chatStrikes.length >= 3) {
+      db.ban(client.id, 24 * HOUR, 'chat');
+      return kick(client.id);
+    }
+    send({ t: 'chat_blocked', reason: reason.startsWith('ai:') ? 'severe' : reason, strikes: client.chatStrikes.length, max: 3 });
   }
 
   // Комплимент после разговора: анонимно, один в сутки на пару, заодно +aura
@@ -680,8 +705,15 @@ wss.on('connection', (ws, req) => {
         const inDuo = Boolean(duos.groupOf(client));
         if ((!peer && !inDuo) || !text || now - lastChat < 400) return;
         lastChat = now;
-        if (inDuo) duos.broadcast(client, { t: 'chat', text });
-        else peer.send({ t: 'chat', text });
+        const r = chatFilter.check(text, { from: client.id, to: inDuo ? 'duo' : peer.id, now });
+        if (r.action === 'block') { onChatViolation(r.reason, text); break; }
+        if (r.action === 'mask') {
+          send({ t: 'chat_masked', reason: r.reason });
+          if (r.reason === 'contact') db.event('chat_mask', client.id, 0, r.reason);
+        }
+        if (inDuo) duos.broadcast(client, { t: 'chat', text: r.text });
+        else peer.send({ t: 'chat', text: r.text });
+        ai.moderateChat(text, client.id).then(v => { if (v && clients.get(client.id) === client) onChatViolation(`ai:${v}`, text); }).catch(() => {});
         break;
       }
       case 'game': {
@@ -738,9 +770,45 @@ wss.on('connection', (ws, req) => {
       case 'guess':
         onGuess(msg);
         break;
-      case 'wrapped':
-        send({ t: 'wrapped', data: db.wrapped(client.id) });
+      case 'wrapped': {
+        const w = db.wrapped(client.id);
+        send({ t: 'wrapped', data: w });
+        ai.wrappedLine(w, msg.lang || client.langs[0]).then(text => text && send({ t: 'wrapped_line', text })).catch(() => {});
         break;
+      }
+      case 'ai_topic': {
+        // ИИ-тема для разговора: одна на пару, не чаще раза в 5 с; на языке пары, с учётом стран
+        const peer = mm.peerOf(client);
+        const now = Date.now();
+        if (!peer || now - lastTopic < 5000) return;
+        lastTopic = now;
+        const lang = client.langs.find(l => peer.langs.includes(l)) || client.langs[0];
+        client.topics = client.topics || [];
+        ai.icebreaker({ lang, countries: [client.country, peer.country], recent: client.topics })
+          .then(text => {
+            if (!text || mm.peerOf(client) !== peer) return send({ t: 'ai_topic_fail' });
+            client.topics = [...client.topics, text].slice(-10);
+            const data = { g: 'topic_text', text };
+            send({ t: 'game', data, mine: true });
+            peer.send({ t: 'game', data });
+            db.event('ai_topic', client.id);
+          })
+          .catch(() => send({ t: 'ai_topic_fail' }));
+        break;
+      }
+      case 'translate': {
+        // Перевод сообщения из чата: до 40 в час на человека
+        const text = String(msg.text || '').slice(0, 300);
+        const now = Date.now();
+        while (translations.length && now - translations[0] > HOUR) translations.shift();
+        if (!text || translations.length >= 40) return send({ t: 'translated', id: msg.id, error: 'limit' });
+        translations.push(now);
+        const lang = /^[a-z]{2}$/.test(msg.lang || '') ? msg.lang : client.langs[0];
+        ai.translate(text, lang)
+          .then(out => send({ t: 'translated', id: msg.id, text: out || null }))
+          .catch(() => send({ t: 'translated', id: msg.id, error: 'fail' }));
+        break;
+      }
       case 'duo_create': case 'duo_join': case 'duo_search': case 'duo_next':
       case 'duo_stop': case 'duo_leave': case 'duo_signal':
         onDuo(msg);
@@ -773,6 +841,35 @@ setInterval(() => {
 }, 30_000).unref();
 
 setInterval(() => mm.tick(), 3_000).unref();
+
+// Кадры на модерацию обязательны: без них разговор прерывается (модифицированный клиент, выключенная камера, свернутое приложение)
+function enforceFrames(now = Date.now()) {
+  if (!moderation.enabled || moderation.up === false) return;
+  const stale = c => now - (c.lastFrameAt || 0) > FRAME_MAX_GAP_MS;
+  for (const [a, b] of mm.pairsOlderThan(FRAME_GRACE_MS, now)) {
+    for (const [c, o] of [[a, b], [b, a]]) {
+      if (!stale(c) || mm.peerOf(c) !== o) continue;
+      db.event('no_frames', c.id);
+      console.log(`no frames ${c.id}: разговор прерван`);
+      mm.leave(c, { t: 'peer_left', reason: 'moderation' });
+      requeue(o);
+      c.send({ t: 'error', code: 'no_frames' });
+      c.send({ t: 'stopped' });
+    }
+  }
+  for (const c of clients.values()) {
+    const g = duos.groupOf(c);
+    if (g && now - g.at > FRAME_GRACE_MS && stale(c)) {
+      db.event('no_frames', c.id);
+      c.send({ t: 'error', code: 'no_frames' });
+      duos.endGroup(c.duo, 'moderation');
+    }
+  }
+}
+setInterval(enforceFrames, Math.min(5_000, FRAME_GRACE_MS)).unref();
+moderation.ping();
+setInterval(() => moderation.ping(), 30_000).unref();
+setInterval(() => chatFilter.sweep(), 10 * 60_000).unref();
 
 setInterval(() => {
   for (const c of clients.values()) c.send({ t: 'online', n: onlineFor(c) });

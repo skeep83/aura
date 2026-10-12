@@ -69,7 +69,7 @@
   $('logout-btn').onclick = async () => { await fetch('/auth/logout', { method: 'POST' }); showLogin(); };
 
   // ---------- Навигация ----------
-  const TITLES = { overview: 'Обзор', users: 'Пользователи', reports: 'Жалобы', payments: 'Платежи', moderation: 'Модерация', rooms: 'Комнаты', system: 'Система' };
+  const TITLES = { overview: 'Обзор', users: 'Пользователи', reports: 'Жалобы', payments: 'Платежи', moderation: 'Модерация', rooms: 'Комнаты', ai: 'ИИ', system: 'Система' };
   const state = { page: 'overview', days: 30, series: null, overview: null, users: { q: '', filter: '', sort: 'recent', offset: 0, limit: 50 } };
   function go(page) {
     state.page = page;
@@ -84,7 +84,7 @@
 
   async function load() {
     try {
-      const loader = { overview: loadOverview, users: loadUsers, reports: loadReports, payments: loadPayments, moderation: loadModeration, rooms: loadRooms, system: loadSystem }[state.page];
+      const loader = { overview: loadOverview, users: loadUsers, reports: loadReports, payments: loadPayments, moderation: loadModeration, rooms: loadRooms, ai: loadAI, system: loadSystem }[state.page];
       await loader();
       $('updated').textContent = 'обновлено ' + new Date().toLocaleTimeString('ru-RU');
     } catch (e) { if (e.message !== 'login') toast('Ошибка: ' + e.message, true); }
@@ -262,7 +262,9 @@
             : '<button class="btn danger sm" data-ban="1">Бан 1 ч</button><button class="btn danger sm" data-ban="24">Бан 24 ч</button><button class="btn danger sm" data-ban="168">Бан 7 дн</button><button class="btn danger sm" data-ban="forever">Навсегда</button>'}
           ${u.online ? '<button class="btn ghost sm" data-act="kick">Отключить сейчас</button>' : ''}
           ${u.reports ? '<button class="btn ghost sm" data-act="clear_reports">Сбросить жалобы</button>' : ''}
+          <button class="btn ghost sm" data-act="ai_review">✨ ИИ-разбор</button>
         </div>
+        <div id="ai-review"></div>
         <div class="act-row"><span class="muted small">Premium:</span>
           <button class="btn ghost sm" data-prem="1">+1 день</button><button class="btn ghost sm" data-prem="7">+7</button><button class="btn ghost sm" data-prem="30">+30</button></div>
         <div class="act-row"><span class="muted small">Салюты:</span>
@@ -317,8 +319,85 @@
       if (text) act('message', { text }, `Отправить сообщение ${name}?`);
     } else if (b.dataset.act === 'unban') act('unban');
     else if (b.dataset.act === 'kick') act('kick', {}, `Отключить ${name} от текущего разговора?`);
+    else if (b.dataset.act === 'ai_review') aiReview(current.user.id, b);
     else if (b.dataset.act === 'clear_reports') act('clear_reports', {}, 'Удалить все жалобы на этого пользователя?');
   };
+
+  async function aiReview(id, btn) {
+    const box = $('ai-review');
+    btn.disabled = true;
+    box.className = 'ai-review';
+    box.textContent = 'ИИ изучает историю пользователя…';
+    try { box.textContent = (await api(`ai/user/${encodeURIComponent(id)}`, { method: 'POST', body: {} })).answer; }
+    catch (e) { box.textContent = e.message === 'ai_off' ? 'ИИ выключен — включите его в разделе «ИИ».' : 'Не получилось: ' + e.message; }
+    btn.disabled = false;
+  }
+
+  // ---------- ИИ ----------
+  let aiCfg = null;
+  async function loadAI() {
+    aiCfg = await api('ai');
+    const c = aiCfg;
+    $('ai-enabled').checked = c.enabled;
+    $('ai-enabled-label').textContent = c.enabled ? 'Включён' : 'Выключен';
+    $('ai-preset').innerHTML = Object.entries(c.presets).map(([k, p]) => `<option value="${esc(k)}"${k === c.preset ? ' selected' : ''}>${esc(p.label)}</option>`).join('');
+    $('ai-base').value = c.baseUrl;
+    $('ai-model').value = c.model;
+    $('ai-key').value = '';
+    $('ai-key-state').textContent = c.keySet ? `Ключ сохранён (${c.keyHint}). Хранится только на сервере.` : 'Ключ не задан.';
+    $('ai-limit').value = c.dailyLimit;
+    $('ai-features').innerHTML = Object.entries(c.featureNames).map(([k, label]) =>
+      `<label><input type="checkbox" data-f="${esc(k)}"${c.features[k] !== false ? ' checked' : ''}><span>${esc(label)}</span></label>`).join('');
+    const u = c.usage;
+    $('ai-usage').innerHTML = [['Запросов', `${fmt(u.requests)} из ${fmt(c.dailyLimit)}`], ['Токенов вход/выход', `${fmt(u.tokensIn)} / ${fmt(u.tokensOut)}`], ['Ошибок', fmt(u.errors)],
+      ...Object.entries(u.byFeature || {}).map(([k, n]) => [`· ${k}`, fmt(n)]), ['Последняя ошибка', esc(u.lastError || '—')]]
+      .map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join('');
+  }
+  $('ai-enabled').onchange = () => { $('ai-enabled-label').textContent = $('ai-enabled').checked ? 'Включён' : 'Выключен'; };
+  $('ai-preset').onchange = () => {
+    const p = aiCfg?.presets[$('ai-preset').value];
+    if (!p) return;
+    if (p.baseUrl) $('ai-base').value = p.baseUrl;
+    if (p.model) $('ai-model').value = p.model;
+  };
+  $('ai-form').onsubmit = async e => {
+    e.preventDefault();
+    const preset = $('ai-preset').value;
+    const features = Object.fromEntries([...document.querySelectorAll('#ai-features [data-f]')].map(i => [i.dataset.f, i.checked]));
+    try {
+      await api('ai', { method: 'POST', body: {
+        enabled: $('ai-enabled').checked, preset, kind: aiCfg.presets[preset]?.kind || 'openai',
+        baseUrl: $('ai-base').value.trim(), model: $('ai-model').value.trim(), apiKey: $('ai-key').value, dailyLimit: Number($('ai-limit').value), features,
+      } });
+      toast('Настройки ИИ сохранены');
+      loadAI();
+    } catch (err) { toast('Не сохранилось: ' + err.message, true); }
+  };
+  $('ai-test').onclick = async () => {
+    $('ai-test-result').textContent = 'Проверяем…';
+    try { const r = await api('ai/test', { method: 'POST', body: {} }); $('ai-test-result').textContent = `✅ Работает: ${r.model}, ответ за ${r.ms} мс`; }
+    catch (err) { $('ai-test-result').textContent = '❌ ' + err.message; }
+    loadAI();
+  };
+  $('ai-clear-key').onclick = async () => {
+    if (!confirm('Удалить сохранённый API-ключ? ИИ-функции перестанут работать.')) return;
+    await api('ai', { method: 'POST', body: { clearKey: true, enabled: false } });
+    toast('Ключ удалён'); loadAI();
+  };
+  async function askAI(q) {
+    if (!q) return;
+    const chat = $('ai-chat');
+    const qa = document.createElement('div'); qa.className = 'q'; qa.textContent = q;
+    const an = document.createElement('div'); an.className = 'a busy'; an.textContent = 'Думаю над данными…';
+    chat.append(qa, an);
+    chat.scrollTop = chat.scrollHeight;
+    try { an.textContent = (await api('ai/ask', { method: 'POST', body: { question: q } })).answer; }
+    catch (e) { an.textContent = e.message === 'ai_off' ? 'ИИ выключен или не задан ключ — настройте провайдера слева.' : 'Ошибка: ' + e.message; }
+    an.classList.remove('busy');
+    chat.scrollTop = chat.scrollHeight;
+  }
+  $('ai-ask').onsubmit = e => { e.preventDefault(); const q = $('ai-question').value.trim(); $('ai-question').value = ''; askAI(q); };
+  $('ai-suggest').onclick = e => { const q = e.target.closest('[data-q]')?.dataset.q; if (q) askAI(q); };
 
   // ---------- Жалобы ----------
   const REASONS = { nudity: '🔞 18+', minor: '🧒 Несовершеннолетний', abuse: '🤬 Оскорбления', spam: '📢 Спам', other: 'Другое' };

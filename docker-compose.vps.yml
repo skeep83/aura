@@ -31,11 +31,13 @@ services:
     build: ./moderation
     image: aura-moderation:latest
     restart: unless-stopped
+    # Два процесса: каждый проверяет кадр ~0,2 с → ~10 кадров/с ≈ 40 человек в разговоре одновременно
+    command: ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
     environment:
       MODERATION_TOKEN: ${MODERATION_TOKEN}
-      TORCH_THREADS: "3"
-    cpus: 4
-    mem_limit: 3g
+      TORCH_THREADS: "2"
+    cpus: 5
+    mem_limit: 5g
 
   # TURN для пар за NAT/CGNAT: UDP 3478 + диапазон ретрансляции, поэтому сеть хоста
   coturn:

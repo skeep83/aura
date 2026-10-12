@@ -6,7 +6,7 @@ const DAY = 24 * 60 * 60 * 1000;
 const HOUR = 60 * 60 * 1000;
 const FOREVER = 8.64e15;
 
-export function createAdmin({ db, cfg, token, live, isOnline, kick, refresh, refund, notify, startedAt = Date.now() }) {
+export function createAdmin({ db, ai, cfg, token, live, isOnline, kick, refresh, refund, notify, startedAt = Date.now() }) {
   const sql = db.db;
   const all = (q, ...a) => sql.prepare(q).all(...a);
   const get = (q, ...a) => sql.prepare(q).get(...a);
@@ -247,6 +247,7 @@ export function createAdmin({ db, cfg, token, live, isOnline, kick, refresh, ref
           case 'moderation': return send(200, moderation(qs)), true;
           case 'rooms': return send(200, rooms()), true;
           case 'config': return send(200, config()), true;
+          case 'ai': return send(200, ai.publicConfig()), true;
         }
       } else if (req.method === 'POST') {
         const body = await readJson(req);
@@ -254,6 +255,32 @@ export function createAdmin({ db, cfg, token, live, isOnline, kick, refresh, ref
           const r = act(parts[1], parts[2], body);
           console.log(`admin: ${parts[2]} ${parts[1]}${r.error ? ' → ' + r.error : ''}`);
           return send(r.error ? 400 : 200, r), true;
+        }
+        if (parts[0] === 'ai') {
+          if (!parts[1]) {
+            // Настройки ИИ: ключ меняется только если прислан новый; пустая строка не затирает
+            const next = {};
+            for (const k of ['enabled', 'preset', 'kind', 'baseUrl', 'model', 'features', 'dailyLimit']) if (k in body) next[k] = body[k];
+            if (typeof body.apiKey === 'string' && body.apiKey.trim()) next.apiKey = body.apiKey.trim();
+            if (body.clearKey) next.apiKey = '';
+            if ('dailyLimit' in next) next.dailyLimit = Math.max(10, Math.min(1_000_000, Number(next.dailyLimit) || 5000));
+            if (next.kind && !['openai', 'anthropic'].includes(next.kind)) return send(400, { error: 'kind' }), true;
+            ai.save(next);
+            db.event('admin_ai_config', '', 0, `${ai.config.preset}:${ai.config.model}`);
+            return send(200, ai.publicConfig()), true;
+          }
+          try {
+            if (parts[1] === 'test') return send(200, await ai.test()), true;
+            if (parts[1] === 'ask') {
+              const answer = await ai.analyst(String(body.question || ''), { overview: overview(), series: series(30) });
+              return send(200, { answer }), true;
+            }
+            if (parts[1] === 'user' && parts[2]) {
+              const d = userDetail(parts[2]);
+              if (!d) return send(404, { error: 'not_found' }), true;
+              return send(200, { answer: await ai.reviewUser(d) }), true;
+            }
+          } catch (e) { return send(400, { error: e.message }), true; }
         }
         if (parts[0] === 'payments' && parts[1] && parts[2] === 'refund') {
           const r = await refund(parts[1]);

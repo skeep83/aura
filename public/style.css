@@ -541,3 +541,11 @@ a { color: var(--accent); text-decoration: none; font-weight: 600; }
 .duo-join .btn-pill { margin: 0; color: var(--title); }
 #chat.duo-mode #vibe-btn, #chat.duo-mode #games-btn, #chat.duo-mode #moment-btn { display: none; }
 .duo-tile:nth-child(n+3) .duo-tag { top: 10px; bottom: auto; }
+
+/* Чат: перевод по нажатию и заблокированные сообщения */
+.msg.tr { cursor: pointer; }
+.msg.tr::after { content: ' 🌐'; font-size: 11px; opacity: .55; }
+.msg.tr.translated::after { content: ' ✨'; }
+.msg.busy { opacity: .6; animation: msg-busy 1s ease-in-out infinite; }
+@keyframes msg-busy { 50% { opacity: .35; } }
+.msg.blocked { text-decoration: line-through; opacity: .5; }

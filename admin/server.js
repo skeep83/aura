@@ -80,7 +80,7 @@ async function proxy(req, res, url) {
       method: req.method,
       headers: { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json', 'user-agent': 'aura-admin/1.0' },
       body: req.method === 'POST' ? await body(req) : undefined,
-      signal: AbortSignal.timeout(15_000),
+      signal: AbortSignal.timeout(url.pathname.startsWith('/api/ai') ? 90_000 : 15_000),
     });
     const text = await r.text();
     res.writeHead(r.status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', ...SECURITY });

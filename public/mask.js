@@ -6,8 +6,8 @@ window.AuraMask = {
     const EMOJI = ['🦊', '🐼', '😎', '👽', '🐯', '🤖', '🐸', '🦄', '🐵', '🐨'];
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
-    canvas.width = 480; canvas.height = 640;
-    const track = canvas.captureStream(20).getVideoTracks()[0];
+    canvas.width = 720; canvas.height = 960;
+    const track = canvas.captureStream(24).getVideoTracks()[0];
     let active = false;
     let landmarker = null;
     let emoji = EMOJI[0];
@@ -17,7 +17,7 @@ window.AuraMask = {
       if (!active) return;
       const v = getRawVideo();
       if (!v || !v.videoWidth) return;
-      const w = 480, h = Math.round(w * v.videoHeight / v.videoWidth);
+      const w = 720, h = Math.round(w * v.videoHeight / v.videoWidth);
       if (canvas.height !== h) canvas.height = h;
 
       let face = null;
