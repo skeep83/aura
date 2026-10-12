@@ -329,7 +329,7 @@ export class Db {
       if (!rows.some(r => r.source === src)) rows.push({ source: src, users: 0, talked: 0, returned: 0, payers: 0, stars: 0 });
     }
     return rows.map(r => {
-      const tag = r.source.replace(/^ad:/, 'ad_');
+      const tag = r.source === 'affiliate' ? 'affiliate' : r.source.replace(/^ad:/, 'ad_');
       return { ...r, botStarts: starts[tag] || 0, landingViews: landing[tag]?.views || 0, landingClicks: landing[tag]?.clicks || 0 };
     });
   }

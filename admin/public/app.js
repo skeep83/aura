@@ -432,9 +432,9 @@
       ${row('Язык', c.lang)}
     </details>`).join('');
     const pct = (a, b) => b ? Math.round(100 * a / b) + '%' : '—';
-    const NAME = s => s === 'direct' ? 'Напрямую' : s === 'ref' ? 'Приглашения друзей' : s === 'duo' ? 'Duo-приглашения' : s.startsWith('ad:') ? `📣 ${s.slice(3)}` : s.startsWith('room:') ? `📢 комната ${s.slice(5)}` : s;
+    const NAME = s => s === 'direct' ? 'Напрямую' : s === 'ref' ? 'Приглашения друзей' : s === 'duo' ? 'Duo-приглашения' : s === 'affiliate' ? '🤝 Партнёры Telegram (25%)' : s.startsWith('ad:') ? `📣 ${s.slice(3)}` : s.startsWith('room:') ? `📢 комната ${s.slice(5)}` : s;
     $('sources-table').innerHTML = `<thead><tr><th>Источник</th><th class="num">Лендинг: просмотры → клики</th><th class="num">/start в боте</th><th class="num">Открыли приложение</th><th class="num">Поговорили</th><th class="num">Вернулись</th><th class="num">Заплатили</th><th class="num">⭐</th></tr></thead><tbody>${
-      d.sources.map(r => `<tr><td><b>${esc(NAME(r.source))}</b></td><td class="num">${r.landingViews ? `${fmt(r.landingViews)} → ${fmt(r.landingClicks)} <small class="muted">${pct(r.landingClicks, r.landingViews)}</small>` : '—'}</td><td class="num">${r.source.startsWith('ad:') ? fmt(r.botStarts) : '—'}</td><td class="num">${fmt(r.users)}</td>
+      d.sources.map(r => `<tr><td><b>${esc(NAME(r.source))}</b></td><td class="num">${r.landingViews ? `${fmt(r.landingViews)} → ${fmt(r.landingClicks)} <small class="muted">${pct(r.landingClicks, r.landingViews)}</small>` : '—'}</td><td class="num">${r.source.startsWith('ad:') || r.source === 'affiliate' ? fmt(r.botStarts) : '—'}</td><td class="num">${fmt(r.users)}</td>
         <td class="num">${fmt(r.talked)} <small class="muted">${pct(r.talked, r.users)}</small></td><td class="num">${fmt(r.returned)} <small class="muted">${pct(r.returned, r.users)}</small></td>
         <td class="num">${fmt(r.payers)} <small class="muted">${pct(r.payers, r.users)}</small></td><td class="num">${fmt(r.stars)}</td></tr>`).join('')
       || '<tr><td colspan="8" class="empty">Пока нет новых пользователей за период</td></tr>'}</tbody>`;

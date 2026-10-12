@@ -316,6 +316,7 @@ function sourceOf(sp, room) {
   if (sp.startsWith('room_')) return `room:${room || '?'}`;
   if (sp.startsWith('ref_')) return 'ref';
   if (sp.startsWith('duo_')) return 'duo';
+  if (sp.startsWith('_tgr_')) return 'affiliate';
   return 'direct';
 }
 
