@@ -51,7 +51,10 @@ export function createJev({ db }) {
         signal: AbortSignal.timeout(timeoutMs),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data?.error?.message || data?.detail || `HTTP ${res.status}`);
+      if (!res.ok) {
+        const err = data?.error?.message || data?.error || data?.detail || data?.message;
+        throw new Error(`HTTP ${res.status}${err ? ': ' + (typeof err === 'string' ? err : JSON.stringify(err)) : ''}`.slice(0, 180));
+      }
       usage.requests++;
       usage.tokensIn += data.usage?.input_tokens || 0;
       usage.byFeature[feature] = (usage.byFeature[feature] || 0) + 1;
