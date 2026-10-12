@@ -167,6 +167,7 @@
     const tries = [
       { video: { facingMode: facing, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30, max: 30 } },
         audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } },
+      { video: { width: { ideal: 1280 }, height: { ideal: 720 } }, audio: true },
       { video: true, audio: true },
       { video: true },
     ];
@@ -222,6 +223,38 @@
   }
 
   // ---------- WebRTC ----------
+  // Видео собеседника идёт со звуком, а встроенный браузер Telegram на компьютере не пускает звук без
+  // нажатия — видео тогда стоит на первом (ещё мутном) кадре. Запускаем без звука, звук — по любому касанию.
+  let soundBlocked = false;
+  async function playRemote() {
+    if (!el.remote.srcObject || !el.remote.paused) return;
+    try { await el.remote.play(); return; }
+    catch (e) { if (e?.name !== 'NotAllowedError') return; }
+    soundBlocked = true;
+    el.remote.muted = true;
+    $('sound-on').hidden = false;
+    el.remote.play().catch(() => {});
+  }
+  setInterval(() => { if (state === 'talking') playRemote(); }, 1500);
+  // Обезличенная статистика видео через 10 с после соединения: двигается ли картинка и в каком качестве
+  async function reportVideo() {
+    try {
+      const st = await pc.getStats();
+      let inb = {}, out = {};
+      const codecs = new Map();
+      st.forEach(x => {
+        if (x.type === 'inbound-rtp' && x.kind === 'video') inb = x;
+        else if (x.type === 'outbound-rtp' && x.kind === 'video') out = x;
+        else if (x.type === 'codec') codecs.set(x.id, x.mimeType);
+      });
+      const cam = localStream?.getVideoTracks()[0]?.getSettings?.() || {};
+      send({ t: 'diag', kind: 'video', platform: tg?.platform || 'web', os: desktopOs(),
+        paused: el.remote.paused, muted: el.remote.muted, vw: el.remote.videoWidth, vh: el.remote.videoHeight,
+        inW: inb.frameWidth, inH: inb.frameHeight, inFps: inb.framesPerSecond, dec: inb.framesDecoded, drop: inb.framesDropped,
+        codec: codecs.get(inb.codecId), outW: out.frameWidth, outH: out.frameHeight, outFps: out.framesPerSecond,
+        ql: out.qualityLimitationReason, camW: cam.width, camH: cam.height });
+    } catch {}
+  }
   function closePeer() {
     clearTimeout(connectTimer);
     clearInterval(frameTimer);
@@ -265,7 +298,7 @@
 
     pc.ontrack = e => {
       if (el.remote.srcObject !== e.streams[0]) el.remote.srcObject = e.streams[0];
-      el.remote.play().catch(playBlocked);
+      playRemote();
     };
     pc.onicecandidate = e => { if (e.candidate) send({ t: 'signal', data: { candidate: e.candidate } }); };
     pc.onconnectionstatechange = () => {
@@ -273,6 +306,8 @@
       if (pc.connectionState === 'connected' && state !== 'talking') {
         clearTimeout(connectTimer);
         reportConn(true, 'connected');
+        const vp = pc;
+        setTimeout(() => { if (pc === vp) reportVideo(); }, 10_000);
         state = 'talking';
         setOverlay(null);
         if (reveal) startReveal(peer);
@@ -2054,16 +2089,12 @@
   // Telegram Desktop на macOS запускает видео только после действия пользователя: play() на каждом
   // <video> внутри нажатия снимает запрет для этого элемента навсегда, дальше play() работает и без нажатия
   function unlockMedia() {
-    for (const v of [el.local, el.selfBg, el.remote]) if (v.paused) v.play()?.catch?.(() => {});
+    if (soundBlocked) { soundBlocked = false; el.remote.muted = false; $('sound-on').hidden = true; }
+    for (const v of [el.local, el.selfBg, el.remote]) if (v.paused || v === el.remote) v.play()?.catch?.(() => {});
   }
   document.addEventListener('pointerdown', unlockMedia, true);
   document.addEventListener('keydown', unlockMedia, true);
-  let tapHinted = false;
-  function playBlocked(e) {
-    if (e?.name !== 'NotAllowedError' || tapHinted) return;
-    tapHinted = true;
-    toast(t('cam_tap'), 5000);
-  }
+  $('sound-on').onclick = e => { e.stopPropagation(); unlockMedia(); };
   async function cameraGranted() {
     try { return (await navigator.permissions?.query({ name: 'camera' }))?.state === 'granted'; } catch { return false; }
   }

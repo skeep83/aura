@@ -1050,9 +1050,18 @@ wss.on('connection', (ws, req) => {
         break;
       }
       case 'diag': {
-        // Почему не включилась камера (имя ошибки, клиент Telegram, ОС) — без личных данных, до 5 на подключение
-        if ((client.diags = (client.diags || 0) + 1) > 5) break;
-        const clean = (v, n = 40) => String(v ?? '').replace(/[^\w .:,()-]/g, '').slice(0, n);
+        // Почему не включилась камера / как идёт видео (клиент Telegram, ОС, кадры) — без личных данных
+        if ((client.diags = (client.diags || 0) + 1) > 30) break;
+        const clean = (v, n = 40) => String(v ?? '').replace(/[^\w .:,()/-]/g, '').slice(0, n);
+        if (msg.kind === 'video') {
+          const n = v => Number.isFinite(Number(v)) ? Math.round(Number(v)) : '-';
+          const tag = `${clean(msg.platform, 12)}/${clean(msg.os, 4)} ${msg.paused ? 'PAUSED' : 'play'}${msg.muted ? '+muted' : ''}`
+            + ` in=${n(msg.inW)}x${n(msg.inH)}@${n(msg.inFps)} dec=${n(msg.dec)} drop=${n(msg.drop)} ${clean(msg.codec, 16)}`
+            + ` out=${n(msg.outW)}x${n(msg.outH)}@${n(msg.outFps)} ql=${clean(msg.ql, 10)} cam=${n(msg.camW)}x${n(msg.camH)}`;
+          db.event('video_stats', client.id, 0, tag);
+          console.log(`video ${tag}`);
+          break;
+        }
         const tag = `${clean(msg.name)} ${clean(msg.platform, 12)}/${clean(msg.ver, 8)}/${clean(msg.os, 4)} ${clean(msg.msg, 80)}`.trim();
         db.event('cam_fail', client.id, 0, tag);
         console.log(`cam FAIL ${tag}`);
