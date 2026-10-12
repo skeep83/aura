@@ -24,6 +24,11 @@
     tg.ready();
     tg.expand();
     tg.disableVerticalSwipes?.();
+    // Полный экран (Bot API 8.0+) на телефонах: кнопка меню и inline-кнопки открывают Mini App не во весь экран
+    if (['ios', 'android'].includes(tg.platform) && tg.isVersionAtLeast?.('8.0') && !tg.isFullscreen) {
+      try { tg.requestFullscreen(); } catch {}
+    }
+    tg.lockOrientation?.();
     tg.onEvent?.('themeChanged', applyTheme);
   }
   systemDark?.addEventListener?.('change', applyTheme);
