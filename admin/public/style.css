@@ -214,3 +214,10 @@ nav .badge { margin-left: auto; min-width: 22px; height: 20px; padding: 0 6px; b
 .ad-text p { margin: 0; flex: 1; }
 .ad-text small { display: block; color: var(--muted); font-size: 11px; margin-top: 4px; }
 #src-days { height: 28px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg2); color: var(--text); font-size: 12px; margin-left: 4px; }
+
+.camp { border: 1px solid var(--line); border-radius: 14px; background: var(--hover); padding: 10px 14px; }
+.camp summary { cursor: pointer; display: flex; justify-content: space-between; align-items: center; gap: 8px; list-style: none; }
+.camp summary::-webkit-details-marker { display: none; }
+.camp[open] summary { margin-bottom: 8px; }
+.camp-row { display: grid; grid-template-columns: 80px 1fr auto; gap: 8px; align-items: center; padding: 6px 0; border-top: 1px dashed var(--line); font-size: 13px; }
+.camp-row b { font-weight: 600; color: var(--title); word-break: break-word; }

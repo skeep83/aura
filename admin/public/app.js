@@ -334,13 +334,35 @@
   }
 
   // ---------- Реклама ----------
-  const AD_TEXTS = [
-    ['ru', 'Видеочат со всем миром прямо в Telegram 🌍 Один свайп — новый собеседник. Подбор по языку, без регистрации. Залетай в Aura ✨'],
-    ['ru', 'Скучно вечером? 🎥 Aura — видеорулетка в Telegram: случайные люди со всего мира, игры в звонке, маска для стеснительных 🎭'],
-    ['ru', 'Собери паспорт из 50 стран, не выходя из дома 🛂 Aura — живые видеоразговоры с людьми со всего мира прямо в Telegram'],
-    ['en', 'Video chat with the whole world right inside Telegram 🌍 One swipe — a new person. Matched by language, no sign-up. Try Aura ✨'],
-    ['en', 'Practice English with real people 🇬🇧 Aura matches you by language: random video chats with people worldwide, right in Telegram'],
-    ['es', 'Videochat con todo el mundo dentro de Telegram 🌍 Un deslizamiento — otra persona. Por idioma, sin registro. Prueba Aura ✨'],
+  // Готовые кампании для Telegram Ads: все поля формы — копируются по одному
+  const CAMPAIGNS = [
+    { code: 'cis_users_1', name: 'A · Русскоязычные СНГ', lang: 'Russian', price: 'дёшево',
+      countries: ['Kazakhstan', 'Belarus', 'Uzbekistan', 'Moldova', 'Kyrgyzstan', 'Armenia', 'Georgia', 'Azerbaijan', 'Tajikistan'],
+      text: 'Видеочат со всем миром прямо в Telegram 🌍 Один свайп — новый собеседник. Подбор по языку, без регистрации. Залетай в Aura ✨' },
+    { code: 'ru_diaspora_1', name: 'A2 · Русскоязычные в Европе и мире', lang: 'Russian', price: 'средне',
+      countries: ['Germany', 'Israel', 'Latvia', 'Estonia', 'Lithuania', 'Poland', 'Czech Republic', 'Cyprus', 'Turkey', 'United Arab Emirates'],
+      text: 'Скучаешь по живому общению на русском? 🎥 Aura — видеочат в Telegram: один свайп — новый собеседник из любой точки мира ✨' },
+    { code: 'en_world_1', name: 'B · Англоязычные', lang: 'English', price: 'дорого (UK/US), средне (Европа)',
+      countries: ['United Kingdom', 'United States', 'Canada', 'Australia', 'Ireland', 'Netherlands', 'Sweden', 'Denmark', 'Norway', 'Finland'],
+      text: 'Video chat with the whole world right inside Telegram 🌍 One swipe — a new person. Matched by language, no sign-up. Try Aura ✨' },
+    { code: 'en_learn_1', name: 'B2 · Практика английского (дешёвые рынки)', lang: 'English', price: 'дёшево',
+      countries: ['India', 'Philippines', 'Nigeria', 'Pakistan', 'Egypt', 'Vietnam', 'Indonesia', 'Malaysia'],
+      text: 'Practice English with real people 🇬🇧 Aura matches you by language: random video chats with people worldwide, right in Telegram ✨' },
+    { code: 'de_1', name: 'C · Немецкоязычные', lang: 'German', price: 'средне',
+      countries: ['Germany', 'Austria', 'Switzerland'],
+      text: 'Videochat mit der ganzen Welt direkt in Telegram 🌍 Ein Wisch — eine neue Person. Nach Sprache, ohne Anmeldung. Probier Aura ✨' },
+    { code: 'es_1', name: 'C · Испаноязычные', lang: 'Spanish', price: 'дёшево (Латам), средне (Испания)',
+      countries: ['Spain', 'Mexico', 'Argentina', 'Colombia', 'Chile', 'Peru'],
+      text: 'Videochat con todo el mundo dentro de Telegram 🌍 Un deslizamiento — otra persona. Por idioma, sin registro. Prueba Aura ✨' },
+    { code: 'pt_1', name: 'C · Португалоязычные', lang: 'Portuguese', price: 'дёшево',
+      countries: ['Brazil', 'Portugal'],
+      text: 'Videochat com o mundo inteiro dentro do Telegram 🌍 Um deslize — uma nova pessoa. Por idioma, sem cadastro. Experimente Aura ✨' },
+    { code: 'tr_1', name: 'C · Турция', lang: 'Turkish', price: 'дёшево',
+      countries: ['Turkey'],
+      text: 'Telegram içinde tüm dünyayla görüntülü sohbet 🌍 Bir kaydırma — yeni biri. Dile göre eşleşme, kayıt yok. Aura’yı dene ✨' },
+    { code: 'id_1', name: 'C · Индонезия', lang: 'Indonesian', price: 'дёшево',
+      countries: ['Indonesia'],
+      text: 'Video chat dengan seluruh dunia langsung di Telegram 🌍 Sekali geser — orang baru. Cocok berdasarkan bahasa, tanpa daftar. Coba Aura ✨' },
   ];
   function adLinks() {
     const code = ($('ad-code').value.trim().replace(/[^\w-]/g, '').slice(0, 40)) || 'CODE';
@@ -351,7 +373,17 @@
     const d = await api('sources?days=' + $('src-days').value);
     state.adBase = d;
     adLinks();
-    $('ad-texts').innerHTML = AD_TEXTS.map(([l, t]) => `<div class="ad-text"><p>${esc(t)}<small>${l.toUpperCase()} · ${[...t].length} симв.</small></p><button class="btn ghost sm" data-text="${esc(t)}">Копировать</button></div>`).join('');
+    const link = code => (state.adBase?.botLink || '').replace('ad_CODE', 'ad_' + code);
+    const row = (label, value, copy = value) => `<div class="camp-row"><span class="muted">${label}</span><b>${esc(value)}</b><button class="btn ghost sm" data-text="${esc(copy)}">⧉</button></div>`;
+    $('ad-texts').innerHTML = CAMPAIGNS.map(c => `<details class="camp"><summary><b>${esc(c.name)}</b><span class="tag">${esc(c.price)}</span></summary>
+      <p class="muted small">Target: Users · Message in Channel · Mobile · без «Politics & Incidents» · картинка бота · On Hold</p>
+      ${row('Заголовок', `Aura ${c.code}`)}
+      ${row('Текст', c.text)}<small class="muted">${[...c.text].length} из 160 символов</small>
+      ${row('Ссылка', link(c.code))}
+      ${row('Страны', c.countries.join(', '))}
+      <p class="muted small">Страны вводятся по одной: начните печатать название и нажмите Enter.</p>
+      ${row('Язык', c.lang)}
+    </details>`).join('');
     const pct = (a, b) => b ? Math.round(100 * a / b) + '%' : '—';
     const NAME = s => s === 'direct' ? 'Напрямую' : s === 'ref' ? 'Приглашения друзей' : s === 'duo' ? 'Duo-приглашения' : s.startsWith('ad:') ? `📣 ${s.slice(3)}` : s.startsWith('room:') ? `📢 комната ${s.slice(5)}` : s;
     $('sources-table').innerHTML = `<thead><tr><th>Источник</th><th class="num">/start в боте</th><th class="num">Открыли приложение</th><th class="num">Поговорили</th><th class="num">Вернулись</th><th class="num">Заплатили</th><th class="num">⭐</th></tr></thead><tbody>${
