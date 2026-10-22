@@ -114,8 +114,9 @@ export function createBot({ token, site, stateFile, appName, adminIds, supportCo
     switch (cmd.split('@')[0]) {
       case '/start': {
         // _tgr_… — ссылка партнёрской программы Telegram (комиссию начисляет сам Telegram)
-        const param = /^(room_|ref_|duo_|ad_|_tgr_)[\w-]{1,60}$|^wrapped$/.test(arg) ? arg : '';
+        const param = /^(room_|ref_|duo_|ad_|src_|_tgr_)[\w-]{1,60}$|^wrapped$/.test(arg) ? arg : '';
         if (param.startsWith('ad_')) db.event('bot_start', from, 0, param);
+        if (param.startsWith('src_')) db.event('bot_start', from, 0, param);
         if (param.startsWith('_tgr_')) db.event('bot_start', from, 0, 'affiliate');
         const p = profile[pickLang(msg.from?.language_code)];
         return reply(chatId, p.description, param ? linkButton(p.button, appLink(param)) : appButton(p.button));

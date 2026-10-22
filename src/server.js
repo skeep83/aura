@@ -372,6 +372,7 @@ const admin = createAdmin({
 // Откуда пришёл пользователь: рекламная кампания (ad_<код>), комната канала, приглашение, Duo
 function sourceOf(sp, room) {
   if (/^ad_[\w-]{1,40}$/.test(sp)) return `ad:${sp.slice(3)}`;
+  if (/^src_[\w-]{1,40}$/.test(sp)) return `src:${sp.slice(4)}`;
   if (sp.startsWith('room_')) return `room:${room || '?'}`;
   if (sp.startsWith('ref_')) return 'ref';
   if (sp.startsWith('duo_')) return 'duo';
