@@ -53,18 +53,19 @@ export function createBot({ token, site, stateFile, appName, adminIds, supportCo
     }
   }
 
+  // Счёт на языке пользователя (язык Telegram сохраняется при входе)
   function createInvoiceLink(userId, planId) {
     const plan = plans[planId];
     if (!plan) throw new Error('unknown plan');
     const salute = plan.kind === 'salute';
+    const lang = db.langOf(userId);
+    const title = salute ? note(lang, 'plan_salutes', { n: plan.count }) : note(lang, plan.days >= 30 ? 'plan_month' : 'plan_week');
     return api('createInvoiceLink', {
-      title: salute ? `${appName} · 🎆 ${plan.title}` : `${appName} Premium · ${plan.title}`,
-      description: salute
-        ? 'Салюты — яркая реакция на весь экран собеседника. Он получает +aura, а каждые 10 салютов — сутки Premium.'
-        : 'Безлимитный фильтр «кого ищу» и приоритет в очереди. Без автопродления.',
+      title: salute ? `${appName} · 🎆 ${title}` : `${appName} Premium · ${title}`,
+      description: note(lang, salute ? 'inv_salute_desc' : 'inv_premium_desc'),
       payload: JSON.stringify({ u: userId, p: planId }),
       currency: 'XTR',
-      prices: [{ label: plan.title, amount: plan.stars }],
+      prices: [{ label: title, amount: plan.stars }],
     });
   }
 
@@ -77,7 +78,7 @@ export function createBot({ token, site, stateFile, appName, adminIds, supportCo
     } catch {}
     await api('answerPreCheckoutQuery', ok
       ? { pre_checkout_query_id: q.id, ok: true }
-      : { pre_checkout_query_id: q.id, ok: false, error_message: 'Платёж не прошёл проверку, попробуйте ещё раз из приложения.' });
+      : { pre_checkout_query_id: q.id, ok: false, error_message: note(q.from?.language_code, 'precheck_fail') });
   }
 
   async function onPaid(msg) {
@@ -98,8 +99,9 @@ export function createBot({ token, site, stateFile, appName, adminIds, supportCo
     });
     onPremium(u, until);
     db.event('premium', u, sp.total_amount, p);
-    const date = new Date(until).toLocaleDateString('ru-RU');
-    await reply(msg.chat.id, `👑 Premium активен до <b>${date}</b>. Спасибо!`, appButton('🎥 Вернуться в чат'));
+    const lang = db.langOf(u) || msg.from?.language_code;
+    const date = new Date(until).toLocaleDateString(lang || 'en');
+    await reply(msg.chat.id, note(lang, 'paid', { date }), appButton(note(lang, 'back')));
   }
 
   async function onMessage(msg) {
@@ -110,11 +112,14 @@ export function createBot({ token, site, stateFile, appName, adminIds, supportCo
     const chatId = msg.chat.id;
     const from = String(msg.from?.id || '');
     if (from && msg.chat.type === 'private') db.setAllowsPm(from);
+    // Тексты команд — на языке Telegram пользователя
+    const lang = msg.from?.language_code || db.langOf(from);
+    const n = (key, vars) => note(lang, key, vars);
 
     switch (cmd.split('@')[0]) {
       case '/start': {
         // _tgr_… — ссылка партнёрской программы Telegram (комиссию начисляет сам Telegram)
-        const param = /^(room_|ref_|duo_|ad_|src_|_tgr_|thread_)[\w-]{1,60}$|^wrapped$/.test(arg) ? arg : '';
+        const param = /^(room_|ref_|inv_|duo_|ad_|src_|_tgr_|thread_)[\w-]{1,60}$|^wrapped$/.test(arg) ? arg : '';
         if (param.startsWith('ad_')) db.event('bot_start', from, 0, param);
         if (param.startsWith('src_')) db.event('bot_start', from, 0, param);
         if (param.startsWith('_tgr_')) db.event('bot_start', from, 0, 'affiliate');
@@ -122,41 +127,32 @@ export function createBot({ token, site, stateFile, appName, adminIds, supportCo
         return reply(chatId, p.description, param ? linkButton(p.button, appLink(param)) : appButton(p.button));
       }
       case '/room': {
-        if (!arg) {
-          return reply(chatId,
-            '📢 <b>Рулетка для вашего канала</b>\n\nСвоя комната, где общаются только ваши подписчики.\n' +
-            'Создать: <code>/room Название канала</code>\n\n' +
-            'Подключите партнёрскую программу бота — и получайте процент со Stars, которые потратят ваши подписчики.');
-        }
+        if (!arg) return reply(chatId, n('room_help'));
         const room = db.createRoom(from, arg);
         const link = appLink(`room_${room.slug}`);
-        return reply(chatId,
-          `✅ Комната «${escape(room.title)}» создана.\n\nСсылка для поста в канале:\n<code>${link}</code>\n\n` +
-          'Статистика: /myrooms', linkButton('Открыть комнату', link));
+        return reply(chatId, n('room_created', { title: escape(room.title), link }), linkButton(n('room_open'), link));
       }
       case '/myrooms': {
         const rooms = db.roomsOf(from);
-        if (!rooms.length) return reply(chatId, 'У вас пока нет комнат. Создайте: <code>/room Название</code>');
-        return reply(chatId, rooms.map(r =>
-          `📢 <b>${escape(r.title)}</b>\nзаходов: ${r.visits} · разговоров: ${r.matches}\n<code>${appLink(`room_${r.slug}`)}</code>`).join('\n\n'));
+        if (!rooms.length) return reply(chatId, n('myrooms_empty'));
+        return reply(chatId, rooms.map(r => n('myrooms_row', { title: escape(r.title), visits: r.visits, matches: r.matches, link: appLink(`room_${r.slug}`) })).join('\n\n'));
       }
       case '/events_off':
         db.setNotify(from, false);
-        return reply(chatId, 'Напоминания об Aura Hour выключены. Включить: /events_on');
+        return reply(chatId, n('events_off'));
       case '/events_on':
         db.setNotify(from, true);
-        return reply(chatId, 'Напоминания об Aura Hour включены 🔥');
+        return reply(chatId, n('events_on'));
       case '/invite': {
         const link = appLink(`ref_${db.refCode(from)}`);
-        return reply(chatId, `Пригласите друга — вы оба получите Premium на сутки 🎁\n\n<code>${link}</code>`,
-          linkButton('Поделиться', `https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent(`Залетай в ${appName} — видеочат со всем миром ✨`)}`));
+        return reply(chatId, n('invite_msg', { link }),
+          linkButton(n('share'), `https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent(n('invite_share', { app: appName }))}`));
       }
       case '/terms':
-        return reply(chatId, `Правила: ${site.url}/terms.html\nКонфиденциальность: ${site.url}/privacy.html`);
+        return reply(chatId, n('terms', { site: site.url }));
       case '/paysupport':
       case '/support':
-        return reply(chatId,
-          `По вопросам оплаты и возврата пишите: ${supportContact}\nУкажите дату платежа — мы ответим в течение 48 часов.`);
+        return reply(chatId, n('support', { contact: supportContact }));
     }
     if (!isAdmin(from)) return;
 

@@ -212,7 +212,9 @@ a { color: var(--accent); text-decoration: none; font-weight: 600; }
 #chat { background: #05060c; }
 .stage { position: absolute; inset: 0; overflow: hidden; touch-action: pan-y; }
 #self-bg { position: absolute; inset: -40px; width: calc(100% + 80px); height: calc(100% + 80px); object-fit: cover;
-  filter: blur(34px) saturate(140%) brightness(.75); transform: scaleX(-1); }
+  filter: blur(24px) saturate(130%) brightness(.75); transform: scaleX(-1); }
+/* В разговоре размытый фон скрыт собеседником — не рисуем его вовсе (видео продолжает играть для кадров модерации) */
+#chat:not(.idle) #self-bg { visibility: hidden; }
 #remote { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block;
   transition: transform .5s var(--ease), opacity .5s, filter .8s var(--ease); }
 #remote.out { transform: translateX(-108%); opacity: 0; }
@@ -380,6 +382,9 @@ a { color: var(--accent); text-decoration: none; font-weight: 600; }
 #chat .peer-chip { top: calc(68px + var(--safe-top)); left: 12px; translate: 0 0; max-width: calc(100% - 152px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 .pair-chip { display: inline-flex; align-items: center; gap: 4px; color: #fff; }
+.invite-chip { display: inline-flex; align-items: center; gap: 6px; font-variant-numeric: tabular-nums; }
+.list-btn span { display: flex; flex-direction: column; }
+.list-btn small { font-size: 12px; font-weight: 500; color: var(--muted); line-height: 1.3; }
 #chat.idle .banners { right: 80px; }
 
 /* Правая панель действий, как в TikTok */

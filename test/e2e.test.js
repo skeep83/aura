@@ -714,3 +714,41 @@ test('Duo: отвал соединения в группе — обе Duo сно
   await assert.rejects(a1.next('duo_matched'), /timeout/, 'те же две Duo сразу не сводятся');
   for (const c of [a1, a2, b1, b2]) c.ws.close();
 });
+
+test('Язык: язык общения по стране, если язык устройства не поддерживается; подсказка интерфейса', async t => {
+  const port = await startServer(t);
+  const ca = await client(port, 'dev-lang-ca', { devCountry: 'ES', lang: 'ca' });
+  assert.deepEqual(ca.ready.me.langs, ['ru'], 'dev-пользователь приходит с русским языком Telegram');
+  assert.equal(ca.ready.langHint, 'es', 'подсказка интерфейса по стране');
+  const nl = await client(port, 'dev-lang-nl', { devCountry: 'NL' });
+  assert.equal(nl.ready.langHint, 'en');
+  for (const x of [ca, nl]) x.ws.close();
+});
+
+test('Позвать друга: открытая ссылка на 10 минут — пришедший сразу в звонке с пригласившим, оба друзья; без ссылки — общая рулетка', async t => {
+  const port = await startServer(t);
+  const host = await client(port, 'dev-inv-host');
+  host.send({ t: 'invite_open' });
+  const inv = await host.next('invite');
+  assert.equal(inv.open, true);
+  assert.match(inv.link, /startapp=inv_[a-z0-9]{6,7}$/);
+  const code = inv.link.split('startapp=inv_')[1];
+
+  const guest = await client(port, 'dev-inv-guest', { startParam: `inv_${code}` });
+  assert.equal(guest.ready.inviteMissed, null);
+  assert.equal(guest.ready.referred, true, 'новичку по приглашению — реферальный бонус');
+  assert.equal((await host.next('invite')).open, false, 'ссылка использована');
+  assert.equal((await host.next('calling')).to.online, true);
+  assert.equal((await guest.next('call_incoming')).from.name, 'Dev');
+  guest.send({ t: 'call_accept' });
+  const [mh, mg] = await Promise.all([host.next('matched'), guest.next('matched')]);
+  assert.equal(mh.peer.direct, 'friend');
+  assert.equal(mg.peer.direct, 'friend');
+  host.send({ t: 'friends' });
+  assert.equal((await host.next('friends')).list.length, 1);
+
+  // Пригласивший не ждёт — гость просто в рулетке
+  const late = await client(port, 'dev-inv-late', { startParam: `inv_${code}` });
+  assert.equal(typeof late.ready.inviteMissed, 'string');
+  for (const x of [host, guest, late]) x.ws.close();
+});

@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ru">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
@@ -21,7 +21,7 @@
       document.documentElement.dataset.theme = dark ? 'dark' : 'light';
     })();
   </script>
-  <link rel="stylesheet" href="style.css?v=20261025">
+  <link rel="stylesheet" href="style.css?v=20261026">
 </head>
 <body>
   <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -242,6 +242,7 @@
       <div class="banner lg" id="room-chip" hidden></div>
       <div class="banner lg" id="duo-chip" hidden></div>
       <button class="banner lg pair-chip" id="pair-chip" hidden>👫 <span data-i="duo">Вдвоём</span></button>
+      <div class="banner lg invite-chip" id="invite-chip" hidden></div>
       <div class="banner lg live-chip" id="live-chip" hidden></div>
       <div class="banner lg ex-chip" id="ex-chip" hidden></div>
     </div>
@@ -461,7 +462,21 @@
     <div class="grip"></div>
     <h2 data-i="friends_title">Друзья</h2>
     <p class="sheet-sub" data-i="friends_sub">Те, с кем был взаимный вайб. Звоните прямо в Aura</p>
+    <button class="btn-grad" id="friends-invite"><span data-i="invite_title2">Позвать друга</span></button>
     <div class="friends-list" id="friends-list"></div>
+  </section>
+
+  <!-- Позвать друга: в звонок по ссылке, в Duo или просто в Aura; ссылка уходит через контакты Telegram -->
+  <section class="lg sheet" id="sheet-invite" hidden>
+    <div class="grip"></div>
+    <h2 data-i="invite_title2">Позвать друга</h2>
+    <p class="sheet-sub" data-i="inv_sub">Выберите, куда позвать — ссылка отправится другу в Telegram</p>
+    <div class="extras">
+      <button class="list-btn" id="inv-call"><i>📞</i><span><b data-i="inv_call">В звонок прямо сейчас</b><small data-i="inv_call_sub">Друг откроет ссылку и сразу попадёт к вам. Ссылка ждёт 10 минут</small></span></button>
+      <button class="list-btn" id="inv-duo"><i>👫</i><span><b data-i="inv_duo">Вместе в Duo</b><small data-i="inv_duo_sub">Вдвоём с двух телефонов знакомиться с другой парой</small></span></button>
+      <button class="list-btn" id="inv-contacts" hidden><i>📒</i><span><b data-i="inv_contacts">Из контактов телефона</b><small data-i="inv_contacts_sub">Выберите контакт — откроем его чат в Telegram, ссылка уже в буфере</small></span></button>
+      <button class="list-btn" id="inv-ref"><i>🎁</i><span><b data-i="inv_ref">Просто пригласить в Aura</b><small data-i="inv_ref_sub">Premium на сутки обоим</small></span></button>
+    </div>
   </section>
 
   <section class="lg sheet center" id="sheet-live" hidden>
@@ -595,14 +610,14 @@
 
   <div class="toasts" id="toasts"></div>
 
-  <script src="vendor/qrcode.js?v=20261025"></script>
-  <script src="i18n.js?v=20261025"></script>
-  <script src="face.js?v=20261025"></script>
-  <script src="mask.js?v=20261025"></script>
-  <script src="games.js?v=20261025"></script>
-  <script src="worldmap.js?v=20261025"></script>
-  <script src="threads.js?v=20261025"></script>
-  <script src="duo.js?v=20261025"></script>
-  <script src="app.js?v=20261025"></script>
+  <script src="vendor/qrcode.js?v=20261026"></script>
+  <script src="i18n.js?v=20261026"></script>
+  <script src="face.js?v=20261026"></script>
+  <script src="mask.js?v=20261026"></script>
+  <script src="games.js?v=20261026"></script>
+  <script src="worldmap.js?v=20261026"></script>
+  <script src="threads.js?v=20261026"></script>
+  <script src="duo.js?v=20261026"></script>
+  <script src="app.js?v=20261026"></script>
 </body>
 </html>

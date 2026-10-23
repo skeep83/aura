@@ -9,7 +9,7 @@ import { Matchmaker, exchangeMirror } from './matchmaker.js';
 import { Db } from './db.js';
 import { Moderation } from './moderation.js';
 import { createBot } from './bot.js';
-import { normalizeLangs, LANGS } from './langs.js';
+import { normalizeLangs, countryLang, LANGS } from './langs.js';
 import { EventSchedule, localDay } from './events.js';
 import { StoryStore } from './stories.js';
 import { note } from './bot-profile.js';
@@ -389,6 +389,7 @@ function sourceOf(sp, room) {
   if (/^src_[\w-]{1,40}$/.test(sp)) return `src:${sp.slice(4)}`;
   if (sp.startsWith('room_')) return `room:${room || '?'}`;
   if (sp.startsWith('ref_')) return 'ref';
+  if (sp.startsWith('inv_')) return 'invite';
   if (sp.startsWith('duo_')) return 'duo';
   if (sp.startsWith('thread_')) return 'thread';
   if (sp.startsWith('_tgr_')) return 'affiliate';
@@ -461,6 +462,7 @@ function liveInviteInfo(code) {
 // ---------- Звонки друзьям ----------
 const CALL_RING_MS = 30_000;       // онлайн-друг: сколько звонит входящий
 const CALL_OFFLINE_MS = 120_000;   // друг не в сети: сколько ждём, пока он откроет ссылку из бота
+const INVITE_MS = 10 * 60_000;     // открытое приглашение inv_<код>: сколько ссылка ждёт друга
 const cardOf = c => ({ code: db.refCode(c.id), name: c.name || '', country: c.country || null });
 function cancelCall(c, reason = 'cancelled') {
   const call = c?.call;
@@ -737,7 +739,8 @@ wss.on('connection', (ws, req) => {
     if (!user.web) db.touch(user.id, user); else db.touch(user.id, { ...user, lang: user.lang });
     const sp = user.startParam || '';
     let referred = false;
-    if (isNew && sp.startsWith('ref_')) {
+    // Реферал: ссылка ref_<код> или приглашение inv_<код> — новичку и другу по суткам Premium
+    if (isNew && (sp.startsWith('ref_') || sp.startsWith('inv_'))) {
       const refId = db.resolveRef(sp.slice(4));
       referred = db.applyReferral(user.id, refId, { days: cfg.referralDays });
       if (referred) {
@@ -755,14 +758,16 @@ wss.on('connection', (ws, req) => {
 
     clients.get(user.id)?.close('replaced');
     const u = db.user(user.id);
+    const geo = /^[A-Z]{2}$/.test(country) && !['XX', 'T1'].includes(country) ? country
+      : cfg.devAnon && /^[A-Z]{2}$/.test(msg.devCountry || '') ? msg.devCountry : '';
     client = {
       id: user.id, name: user.name || '', username: user.username || '',
-      gender: u.gender, want: u.want, baseLangs: normalizeLangs(u.langs, user.lang),
+      // Язык общения: сохранённые → язык устройства → язык страны → английский
+      gender: u.gender, want: u.want, baseLangs: normalizeLangs(u.langs, [user.lang, countryLang(geo), 'en']),
       exchange: validExchange({ native: u.ex_native, learn: u.ex_learn }),
       premium: db.isPremium(u), room, tier: auraOf(u).tier, vibe: null, rateTarget: null,
       matches: db.matchCount(user.id),
-      reveal: Boolean(u.reveal), pair: Boolean(u.pair), country: /^[A-Z]{2}$/.test(country) && !['XX', 'T1'].includes(country) ? country
-        : cfg.devAnon && /^[A-Z]{2}$/.test(msg.devCountry || '') ? msg.devCountry : '',
+      reveal: Boolean(u.reveal), pair: Boolean(u.pair), country: geo,
       minorHist: [], fromTelegram: !user.web && !String(user.id).startsWith('dev-') || (cfg.devAnon && !user.web),
       send, close: reason => ws.close(4005, reason),
     };
@@ -784,6 +789,25 @@ wss.on('connection', (ws, req) => {
       const caller = callerId && clients.get(callerId);
       if (caller?.call?.with === user.id) client.callFrom = callerId;
     }
+    // Открытое приглашение inv_<код>: друг ждёт с открытой ссылкой — зовём его к пришедшему напрямую, оба становятся друзьями
+    if (sp.startsWith('inv_')) {
+      const inviterId = db.resolveRef(sp.slice(4));
+      const inviter = inviterId && inviterId !== user.id ? clients.get(inviterId) : null;
+      if (inviter?.invite && inviter.invite.until > Date.now() && !inviter.call && !inviter.direct && !inviter.live) {
+        inviter.invite = null;
+        inviter.send({ t: 'invite', open: false });
+        db.addFriends(inviter.id, user.id);
+        requeue(mm.leave(inviter));
+        if (inviter.duo) duos.leave(inviter);
+        inviter.call = { with: user.id, role: 'caller', timer: setTimeout(() => { cancelCall(inviter, 'timeout'); inviter.send({ t: 'call_timeout' }); }, CALL_OFFLINE_MS) };
+        inviter.send({ t: 'calling', to: { name: user.name || '', online: true } });
+        client.callFrom = inviterId;
+        db.event('invite_join', user.id);
+      } else if (inviterId && inviterId !== user.id) {
+        client.inviteMissed = db.user(inviterId).name || '';
+        db.event('invite_miss', user.id);
+      }
+    }
     const source = sourceOf(sp, room);
     if (isNew) db.setSource(client.id, source);
     db.event('session', client.id, 0, source === 'direct' ? '' : source);
@@ -801,6 +825,9 @@ wss.on('connection', (ws, req) => {
       openWrapped: sp === 'wrapped', ai: ai.clientFeatures(),
       liveInvite: sp.startsWith('live_') ? liveInviteInfo(sp.slice(5)) : null,
       callInvite: sp.startsWith('call_') ? { code: sp.slice(5) } : null,
+      // Подсказка языка интерфейса по стране — если язык устройства не из восьми поддерживаемых
+      langHint: countryLang(geo) || 'en',
+      inviteMissed: client.inviteMissed ?? null,
       thread: threadCard, threadsSeen: u.threads_seen || 0, threadKinds: Object.fromEntries(Object.entries(threadKinds).map(([k, v]) => [k, v])),
       openThread: /^thread_[\w-]{1,20}$/.test(sp) ? sp.slice(7) : null,
     });
@@ -810,6 +837,7 @@ wss.on('connection', (ws, req) => {
       if (caller?.call?.with === client.id) { client.call = { with: caller.id, role: 'callee', timer: null }; send({ t: 'call_incoming', from: cardOf(caller) }); }
       client.callFrom = null;
     }
+    client.inviteMissed = null;
   }
 
   async function onFrame(msg) {
@@ -1323,6 +1351,18 @@ wss.on('connection', (ws, req) => {
       }
       case 'call_cancel':
         cancelCall(client);
+        break;
+      case 'invite_open': {
+        // Ссылка inv_<код> на 10 минут: друг откроет её — и попадёт сразу в звонок с вами
+        const until = Date.now() + INVITE_MS;
+        client.invite = { until };
+        db.event('invite_open', client.id);
+        send({ t: 'invite', open: true, until, link: appLink(`inv_${db.refCode(client.id)}`) });
+        break;
+      }
+      case 'invite_close':
+        client.invite = null;
+        send({ t: 'invite', open: false });
         break;
       case 'live_start':
         if (client.duo) duos.leave(client);

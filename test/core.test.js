@@ -311,3 +311,12 @@ test('вдвоём с одного телефона: сначала только
   mm.tick(30_000);
   assert.equal(mm.peerOf(single), pair, 'после ожидания одиночка получает двоих');
 });
+
+test('языки: без русского по умолчанию — язык устройства, затем страна, затем английский', async () => {
+  const { countryLang } = await import('../src/langs.js');
+  assert.deepEqual(normalizeLangs('', ['ca', countryLang('ES'), 'en']), ['es'], 'каталонец в Испании — испанский');
+  assert.deepEqual(normalizeLangs('', ['nl', countryLang('NL'), 'en']), ['en'], 'нет языка страны — английский');
+  assert.deepEqual(normalizeLangs('', ['ro', countryLang('MD'), 'en']), ['ru'], 'Молдова — русский как общий язык');
+  assert.deepEqual(normalizeLangs('', 'xx'), ['en'], 'неизвестный фолбэк — английский, не русский');
+  assert.deepEqual(normalizeLangs('ru,en', ['es']), ['ru', 'en'], 'сохранённые языки важнее');
+});

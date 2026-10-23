@@ -163,13 +163,16 @@
   }
 
   // ---------- Камера ----------
+  // Телефон: 960×540 и 24 к/с — на экране телефона разницы с 720p нет, а кодирование и аккумулятор заметно легче. Компьютер — 720p30
+  const isPhone = ['android', 'ios', 'android_x'].includes(tg?.platform) || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+  const VIDEO = isPhone ? { w: 960, h: 540, fps: 24, kbps: 1_400_000 } : { w: 1280, h: 720, fps: 30, kbps: 2_500_000 };
+  const camVideo = mode => ({ facingMode: mode, width: { ideal: VIDEO.w }, height: { ideal: VIDEO.h }, frameRate: { ideal: VIDEO.fps, max: 30 } });
   // WebView в Telegram для компьютера капризнее браузера: если полный запрос не прошёл (не запрет), пробуем проще
   async function startCamera() {
     if (!navigator.mediaDevices?.getUserMedia) throw Object.assign(new Error('getUserMedia unavailable'), { name: 'NoMediaDevices' });
     const tries = [
-      { video: { facingMode: facing, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30, max: 30 } },
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } },
-      { video: { width: { ideal: 1280 }, height: { ideal: 720 } }, audio: true },
+      { video: camVideo(facing), audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } },
+      { video: { width: { ideal: VIDEO.w }, height: { ideal: VIDEO.h } }, audio: true },
       { video: true, audio: true },
       { video: true },
     ];
@@ -186,7 +189,7 @@
   async function flipCamera() {
     const want = facing === 'user' ? 'environment' : 'user';
     try {
-      const s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: want, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30, max: 30 } } });
+      const s = await navigator.mediaDevices.getUserMedia({ video: camVideo(want) });
       const track = s.getVideoTracks()[0];
       const old = localStream.getVideoTracks()[0];
       localStream.removeTrack(old);
@@ -217,6 +220,13 @@
     const jpg = frameCanvas.toDataURL('image/jpeg', 0.7).split(',')[1];
     send({ t: 'frame', jpg });
   }
+  // Свёрнутое приложение: своя камера и кадры на модерацию на паузе — ни кодирования, ни сети; вернулись — продолжаем
+  document.addEventListener('visibilitychange', () => {
+    const hidden = document.hidden;
+    for (const tr of localStream?.getVideoTracks() || []) tr.enabled = !hidden;
+    if (hidden) clearInterval(frameTimer);
+    else if (state === 'talking' || duo.active) startFrames();
+  });
   function startFrames() {
     clearInterval(frameTimer);
     if (!moderation) return;
@@ -367,8 +377,8 @@
         params.encodings = params.encodings?.length ? params.encodings : [{}];
         const e = params.encodings[0];
         if (kind === 'video') {
-          e.maxBitrate = 2_500_000;
-          e.maxFramerate = 30;
+          e.maxBitrate = VIDEO.kbps;
+          e.maxFramerate = VIDEO.fps;
           e.scaleResolutionDownBy = 1;
           params.degradationPreference = 'balanced';
         } else {
@@ -483,11 +493,14 @@
         freePerDay = msg.freeFilterPerDay ?? freePerDay;
         aiFeatures = msg.ai || {};
         window.AuraI18n.setApp(appName);
+        // Язык устройства не из восьми — интерфейс на языке страны (например, Испания → испанский)
+        if (msg.langHint && window.AuraI18n.fallback && window.AuraI18n.setLang(msg.langHint)) { renderLangs(); renderComplChips(); }
         setMe(msg.me);
         setOnline(msg.online);
         setEvent(msg.event);
         setRoom(msg.room);
         if (msg.referred) toast(t('referred'), 4000);
+        if (msg.inviteMissed !== null && msg.inviteMissed !== undefined) toast(t('inv_offline', { name: msg.inviteMissed || t('vibe_someone') }), 6000);
         setupExtras();
         threads.setup(msg);
         if (msg.openWrapped && !wrappedShown) { wrappedShown = true; setTimeout(openWrapped, 600); }
@@ -619,6 +632,7 @@
         haptic('success');
         break;
       case 'wrapped': renderWrapped(msg.data); break;
+      case 'invite': onInvite(msg); break;
       case 'thread_pocket': case 'thread_card': case 'thread_received': case 'thread_passed': case 'thread_declined':
       case 'thread_final': case 'thread_offer': case 'thread_page': case 'thread_news': case 'thread_error':
         threads.onMessage(msg);
@@ -672,8 +686,10 @@
   }
 
   // ---------- Языки ----------
-  let myLangs = [(tg?.initDataUnsafe?.user?.language_code || navigator.language || 'ru').slice(0, 2)].filter(l => LANG_META[l]);
-  if (!myLangs.length) myLangs = ['ru'];
+  // Язык общения до входа: Telegram и языки устройства; ничего не подошло — английский (сервер подскажет язык по стране)
+  let myLangs = [...new Set([tg?.initDataUnsafe?.user?.language_code, ...(navigator.languages || []), navigator.language]
+    .filter(Boolean).map(l => String(l).slice(0, 2).toLowerCase()).filter(l => LANG_META[l]))].slice(0, 1);
+  if (!myLangs.length) myLangs = ['en'];
   function renderLangs() {
     for (const id of ['lang-chips', 'lang-chips-2']) {
       const wrap = $(id);
@@ -890,11 +906,67 @@
     const share = `https://t.me/share/url?url=${encodeURIComponent(url)}&text=${encodeURIComponent(text)}`;
     if (tg?.initData) tg.openTelegramLink(share);
     else if (navigator.share) navigator.share({ url, text }).catch(() => {});
-    else { navigator.clipboard?.writeText(url); toast(t('link_copied')); }
+    else { navigator.clipboard?.writeText(url).catch(() => {}); toast(t('link_copied')); }
     haptic();
   }
-  $('invite-btn').onclick = shareInvite;
-  $('invite-btn2').onclick = shareInvite;
+  // ---------- Позвать друга: в звонок по открытой ссылке, в Duo, из контактов телефона или просто в Aura ----------
+  let inviteTimer = null, inviteVia = null; // 'share' | 'contacts'
+  const telegramShare = (url, text) => {
+    const share = `https://t.me/share/url?url=${encodeURIComponent(url)}&text=${encodeURIComponent(text)}`;
+    if (tg?.initData) tg.openTelegramLink(share);
+    else if (navigator.share) navigator.share({ url, text }).catch(() => {});
+    else { navigator.clipboard?.writeText(url).catch(() => {}); toast(t('link_copied')); }
+  };
+  function openInvite() {
+    $('inv-contacts').hidden = !navigator.contacts?.select;
+    openSheet('sheet-invite');
+    haptic();
+  }
+  $('invite-btn').onclick = openInvite;
+  $('invite-btn2').onclick = openInvite;
+  $('friends-invite').onclick = openInvite;
+  $('inv-call').onclick = () => { inviteVia = 'share'; requestPm(); send({ t: 'invite_open' }); };
+  $('inv-contacts').onclick = () => { inviteVia = 'contacts'; requestPm(); send({ t: 'invite_open' }); };
+  $('inv-duo').onclick = () => { closeSheet(); closePeer(); send({ t: 'duo_create' }); haptic('medium'); };
+  $('inv-ref').onclick = () => { closeSheet(); shareInvite(); };
+  function renderInviteChip(until) {
+    clearInterval(inviteTimer);
+    const chip = $('invite-chip');
+    if (!until) { chip.hidden = true; return; }
+    const draw = () => {
+      const left = Math.max(0, until - Date.now());
+      if (!left) { chip.hidden = true; clearInterval(inviteTimer); return; }
+      const m = Math.floor(left / 60000), sec = Math.floor(left / 1000) % 60;
+      chip.replaceChildren(`📞 ${t('inv_waiting')} · ${m}:${String(sec).padStart(2, '0')}`);
+      const x = document.createElement('button');
+      x.textContent = '✕';
+      x.onclick = () => { send({ t: 'invite_close' }); haptic(); };
+      chip.append(x);
+    };
+    draw();
+    chip.hidden = false;
+    inviteTimer = setInterval(draw, 1000);
+  }
+  // Контакты телефона (Android): выбираем контакт, ссылка в буфере, открываем его чат в Telegram по номеру
+  async function inviteViaContacts(link) {
+    try {
+      const [c] = await navigator.contacts.select(['tel', 'name'], { multiple: false });
+      const tel = String(c?.tel?.[0] || '').replace(/[^\d+]/g, '');
+      await navigator.clipboard?.writeText(link);
+      toast(t('inv_copied'), 5000);
+      if (tel) tg?.openTelegramLink?.(`https://t.me/${tel.startsWith('+') ? tel : '+' + tel}`);
+    } catch (e) { if (e?.name !== 'AbortError') telegramShare(link, t('inv_share_text')); }
+  }
+  function onInvite(msg) {
+    if (!msg.open) { renderInviteChip(0); return; }
+    closeSheet();
+    renderInviteChip(msg.until);
+    toast(t('inv_opened'), 3500);
+    haptic('success');
+    if (inviteVia === 'contacts') inviteViaContacts(msg.link);
+    else telegramShare(msg.link, t('inv_share_text'));
+    inviteVia = null;
+  }
 
   // ---------- Настройки: напоминания, маска по умолчанию ----------
   $('notify-seg').onclick = e => {

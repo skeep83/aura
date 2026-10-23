@@ -7,23 +7,25 @@ window.AuraMask = {
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
     canvas.width = 720; canvas.height = 960;
-    const track = canvas.captureStream(24).getVideoTracks()[0];
+    const track = canvas.captureStream(15).getVideoTracks()[0];
     let active = false;
     let landmarker = null;
     let emoji = EMOJI[0];
     let last = null; // последняя найденная рамка, чтобы маска не мигала
+    let tick = 0;
 
+    // 15 кадров в секунду, лицо ищем на каждом втором — для аккумулятора; лицо между ними не убегает
     function draw() {
-      if (!active) return;
+      if (!active || document.hidden) return;
       const v = getRawVideo();
       if (!v || !v.videoWidth) return;
       const w = 720, h = Math.round(w * v.videoHeight / v.videoWidth);
       if (canvas.height !== h) canvas.height = h;
 
       let face = null;
-      if (landmarker) { try { face = window.AuraFace.detect(landmarker, v); } catch {} }
+      if (landmarker && (tick++ % 2 === 0)) { try { face = window.AuraFace.detect(landmarker, v); } catch {} }
       if (face) last = { box: face.box, at: performance.now() };
-      const box = face?.box || (last && performance.now() - last.at < 400 ? last.box : null);
+      const box = face?.box || (last && performance.now() - last.at < 500 ? last.box : null);
 
       if (box) {
         ctx.drawImage(v, 0, 0, w, h);
@@ -44,7 +46,7 @@ window.AuraMask = {
         ctx.fillText(emoji, w / 2, h / 2);
       }
     }
-    setInterval(draw, 50);
+    setInterval(draw, 66);
 
     return {
       track,

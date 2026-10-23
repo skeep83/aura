@@ -2,7 +2,7 @@
 // предложение (offer) делает участник с меньшим слотом. Сигналы идут через сервер с адресом-слотом.
 // Битрейт видео ограничен: исходящих потоков три, а мобильный аплинк небольшой.
 window.AuraDuo = (() => {
-  const MAX_BITRATE = 700_000; // на каждый из трёх исходящих потоков
+  const MAX_BITRATE = 450_000; // на каждый из трёх исходящих потоков: четыре окна на экране, больше не нужно
   const CONNECT_MS = 15_000;   // не соединились за это время — сообщаем серверу, группа распадается и обе Duo ищут дальше
 
   function create({ send, getIce, getTracks, grid, onConnected, onAllGone, flagOf }) {
@@ -30,7 +30,8 @@ window.AuraDuo = (() => {
           const p = s.getParameters();
           p.encodings = p.encodings?.length ? p.encodings : [{}];
           p.encodings[0].maxBitrate = MAX_BITRATE;
-          p.encodings[0].scaleResolutionDownBy = 1.5; // 720p → 480p: четыре окна на экране, лишние пиксели не нужны
+          p.encodings[0].scaleResolutionDownBy = 2; // вчетверо меньше пикселей на окно — три кодировщика на телефоне иначе не тянут
+          p.encodings[0].maxFramerate = 20;
           await s.setParameters(p);
         } catch {}
       }
