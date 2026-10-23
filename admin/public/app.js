@@ -69,8 +69,8 @@
   $('logout-btn').onclick = async () => { await fetch('/auth/logout', { method: 'POST' }); showLogin(); };
 
   // ---------- Навигация ----------
-  const TITLES = { overview: 'Обзор', users: 'Пользователи', reports: 'Жалобы', payments: 'Платежи', moderation: 'Модерация', rooms: 'Комнаты', ads: 'Реклама', ai: 'ИИ', jev: 'Jev · модель решений', system: 'Система' };
-  const state = { page: 'overview', days: 30, series: null, overview: null, users: { q: '', filter: '', sort: 'recent', offset: 0, limit: 50 } };
+  const TITLES = { overview: 'Обзор', users: 'Пользователи', reports: 'Жалобы', payments: 'Платежи', moderation: 'Модерация', threads: 'Нити', rooms: 'Комнаты', ads: 'Реклама', ai: 'ИИ', jev: 'Jev · модель решений', system: 'Система' };
+  const state = { page: 'overview', days: 30, series: null, overview: null, users: { q: '', filter: '', sort: 'recent', offset: 0, limit: 50 }, threads: { status: '', kind: '' } };
   function go(page) {
     state.page = page;
     for (const a of $('nav').children) a.classList.toggle('on', a.dataset.page === page);
@@ -84,7 +84,7 @@
 
   async function load() {
     try {
-      const loader = { overview: loadOverview, users: loadUsers, reports: loadReports, payments: loadPayments, moderation: loadModeration, rooms: loadRooms, ads: loadAds, ai: loadAI, jev: loadJev, system: loadSystem }[state.page];
+      const loader = { overview: loadOverview, users: loadUsers, reports: loadReports, payments: loadPayments, moderation: loadModeration, threads: loadThreads, rooms: loadRooms, ads: loadAds, ai: loadAI, jev: loadJev, system: loadSystem }[state.page];
       await loader();
       $('updated').textContent = 'обновлено ' + new Date().toLocaleTimeString('ru-RU');
     } catch (e) { if (e.message !== 'login') toast('Ошибка: ' + e.message, true); }
@@ -108,6 +108,8 @@
       kpi('Доход', `${fmt(T.stars)} ⭐`, `за сутки ${fmt(f.stars)} ⭐ · Premium ${fmt(T.premium)}`),
       kpi('Удержание D1', f.d1, `вайбов ${fmt(f.vibeMatches)}`),
       kpi('Безопасность', `${fmt(f.reports)}`, `жалоб · NSFW ${f.nsfwStrikes} · возраст ${f.ageBlocks} · бан ${T.banned}`),
+      kpi('Нити', fmt(L.threadsLive || 0), `в карманах · застряло ${fmt(L.threadsPool || 0)} · завершено ${fmt(L.threadsDone || 0)}`),
+      kpi('Вдвоём и друзья', fmt(L.pairOnline || 0), `вдвоём онлайн · Duo ${fmt(L.duos || 0)} · эфиров ${fmt(L.liveRooms || 0)} · ссылок открыто ${fmt(L.invitesOpen || 0)}`),
     ].join('');
     $('nav-reports').hidden = !f.reports;
     $('nav-reports').textContent = f.reports;
@@ -116,8 +118,12 @@
     $('funnel').innerHTML = funnel.map(([k, v]) => `<tr><td>${esc(k)}</td><td>${esc(v)}</td></tr>`).join('');
     const V = o.viral;
     const viral = [['🎯 Угадали страну', V.guess_ok], ['💌 Комплименты', V.compliment], ['🎆 Салюты отправлено', V.salute], ['🎆 Покупок салютов', V.salute_buy],
-      ['👫 Duo создано', V.duo_create], ['👫 Звонков Duo', V.duo_call], ['✨ Взаимных вайбов', Math.round(V.vibe_match / 2)]];
-    $('viral').innerHTML = viral.map(([k, v]) => `<tr><td>${esc(k)}</td><td>${fmt(v)}</td></tr>`).join('');
+      ['✨ Взаимных вайбов', Math.round(V.vibe_match / 2)], ['📞 Звонков друзьям', V.friend_call_ok],
+      ['🧵 Нитей начато / ходов / завершено', `${fmt(V.thread_start)} / ${fmt(V.thread_move)} / ${fmt(V.thread_done)}`], ['🧵 Застрявших нитей взяли', V.thread_accept],
+      ['📨 Ссылок в звонок: открыто / пришли / опоздали', `${fmt(V.invite_open)} / ${fmt(V.invite_join)} / ${fmt(V.invite_miss)}`],
+      ['👫 Duo создано / звонков / не соединились', `${fmt(V.duo_create)} / ${fmt(V.duo_call)} / ${fmt(V.duo_conn_fail)}`],
+      ['🎙 Эфиров / зрителей', `${fmt(V.live_start)} / ${fmt(V.live_join)}`], ['🖼 Карточек отправлено в чаты', V.share_prepare], ['💡 Тем от ИИ', V.ai_topic]];
+    $('viral').innerHTML = viral.map(([k, v]) => `<tr><td>${esc(k)}</td><td>${typeof v === 'string' ? esc(v) : fmt(v)}</td></tr>`).join('');
     const bars = (rows, label, key = 'n') => {
       const max = Math.max(1, ...rows.map(r => r[key]));
       return `<div class="bars">${rows.map(r => `<div class="bar"><span>${label(r)}</span><i style="width:${(100 * r[key] / max).toFixed(1)}%"></i><em>${fmt(r[key])}</em></div>`).join('') || '<span class="muted">нет данных</span>'}</div>`;
@@ -125,6 +131,10 @@
     $('audience').innerHTML = '<h3>Страны</h3>' + bars(o.countries.slice(0, 8), r => `${flag(r.country)} ${esc(r.country)}`)
       + '<h3>Языки Telegram</h3>' + bars(o.langs.slice(0, 6), r => esc(r.lang))
       + '<h3>Пол</h3>' + bars(o.genders, r => ({ m: '👨 Парни', f: '👩 Девушки', x: '· не указан' }[r.gender] || r.gender));
+    const M = o.modes || {};
+    $('modes').innerHTML = [['👫 Вдвоём с одного телефона', M.pair], ['🎧 Сначала голос', M.reveal], ['🗣 Языковой обмен', M.exchange], ['🔔 Напоминания об Aura Hour', M.notify],
+      ['👥 Пар друзей', M.friendsPairs], ['👑 Premium сейчас', T.premium]].map(([k, v]) => `<tr><td>${esc(k)}</td><td>${fmt(v)}</td></tr>`).join('');
+    $('chat-langs').innerHTML = bars((o.chatLangs || []).slice(0, 8), r => esc(r.lang));
     drawCharts(s);
   }
 
@@ -176,7 +186,8 @@
     chart($('chart-users'), rows, [{ key: 'dau', color: '--c1' }, { key: 'newUsers', color: '--c2' }]);
     chart($('chart-talk'), rows, [{ key: 'matches', color: '--c1', bars: true }, { key: 'talkMin', color: '--c3', axis: 'right' }]);
     chart($('chart-stars'), rows, [{ key: 'stars', color: '--c5' }], { bars: true });
-    chart($('chart-quality'), q, [{ key: 'failPct', color: '--c4' }, { key: 'reports', color: '--c5', axis: 'right', bars: true }]);
+    chart($('chart-quality'), q, [{ key: 'failPct', color: '--c4' }, { key: 'reports', color: '--c5', axis: 'right', bars: true }, { key: 'camFail', color: '--c3', axis: 'right' }]);
+    chart($('chart-viral'), rows, [{ key: 'threadMoves', color: '--c1', bars: true }, { key: 'invites', color: '--c2', axis: 'right' }, { key: 'duoFail', color: '--c4', axis: 'right' }]);
   }
   window.addEventListener('resize', () => { if (state.page === 'overview' && state.series) drawCharts(state.series); });
 
@@ -226,8 +237,15 @@
   // ---------- Карточка пользователя ----------
   const EVENT_NAMES = { session: 'вход', match: 'разговор', call_end: 'конец разговора', talk: 'время в разговоре', vibe: 'вайб', vibe_match: 'взаимный вайб', report: 'пожаловался',
     conn_ok: 'соединение ок', conn_fail: 'соединение не удалось', nsfw: 'NSFW', age_block: 'блок по возрасту', premium: 'купил Premium', guess_ok: 'угадал страну',
-    compliment: 'комплимент', salute: 'салют', salute_buy: 'купил салюты', duo_create: 'создал Duo', duo_join: 'вошёл в Duo', admin_ban: 'бан (админ)', admin_unban: 'разбан (админ)',
-    admin_premium: 'Premium (админ)', admin_salutes: 'салюты (админ)', admin_aura: 'аура (админ)', admin_message: 'сообщение (админ)', admin_clear_reports: 'жалобы сброшены' };
+    compliment: 'комплимент', salute: 'салют', salute_buy: 'купил салюты', duo_create: 'создал Duo', duo_join: 'вошёл в Duo', duo_call: 'звонок Duo', duo_conn_ok: 'Duo: все соединились', duo_conn_fail: 'Duo: не соединился',
+    admin_ban: 'бан (админ)', admin_unban: 'разбан (админ)', admin_premium: 'Premium (админ)', admin_salutes: 'салюты (админ)', admin_aura: 'аура (админ)', admin_message: 'сообщение (админ)', admin_clear_reports: 'жалобы сброшены',
+    thread_start: 'начал нить', thread_show: 'показал нить', thread_move: 'ход в нити', thread_done: 'закрыл нить', thread_accept: 'взял застрявшую нить', thread_drop: 'отпустил нить', thread_hide: 'ход скрыт модерацией',
+    pair_on: 'включил «вдвоём»', pair_off: 'выключил «вдвоём»', exchange_on: 'включил языковой обмен', exchange_off: 'выключил языковой обмен',
+    invite_open: 'открыл ссылку другу', invite_join: 'пришёл по ссылке друга', invite_miss: 'пришёл по ссылке, друг не ждал', friend_call: 'позвонил другу', friend_call_ok: 'звонок другу состоялся',
+    live_start: 'начал эфир', live_join: 'встал в очередь эфира', chat_block: 'сообщение заблокировано', chat_mask: 'контакт скрыт в чате', no_frames: 'разговор прерван: нет кадров',
+    cam_fail: 'камера не включилась', video_stats: 'статистика видео', web_login: 'вход с компьютера', handoff: 'код для компьютера', crowd_on: 'подписался «позовите»', crowd_off: 'отписался «позовите»',
+    crowd_notify: 'позвали, когда собрались', ai_topic: 'тема от ИИ', share_prepare: 'отправил карточку в чат', jev_triage: 'Jev разобрал жалобу', jev_autoban: 'автобан Jev', bot_start: '/start в боте',
+    landing_view: 'лендинг: просмотр', landing_click: 'лендинг: клик', admin_thread_archive: 'нить в архив (админ)', admin_thread_hide: 'ход скрыт (админ)' };
   const COMPL = { smile: '😊 Улыбка', funny: '😂 Смешно', smart: '🧠 Умно', kind: '💛 Добрый', voice: '🎙️ Голос', world: '🌍 Интересно' };
   let current = null;
   async function openUser(id) {
@@ -247,6 +265,8 @@
         ${premium ? `<span class="tag gold">👑 Premium ${until(u.premiumUntil)}</span>` : ''}
         ${banned ? `<span class="tag bad">⛔ ${esc(u.banReason || 'бан')} ${until(u.bannedUntil)}</span>` : ''}
         ${u.reveal ? '<span class="tag">🎧 сначала голос</span>' : ''}
+        ${u.pair ? '<span class="tag">👫 вдвоём с одного телефона</span>' : ''}
+        ${u.exchange ? `<span class="tag">🗣 обмен ${esc(u.exchange.native)} → ${esc(u.exchange.learn)}</span>` : ''}
         ${u.allowsPm ? '<span class="tag">✉️ бот может писать</span>' : ''}
       </div>
       <div class="stats">
@@ -254,7 +274,12 @@
         <div><b>${fmt(d.wrapped.chats)}</b><small>разговоров 7д</small></div>
         <div><b>${fmt(u.salutes)}/${fmt(u.salutesReceived)}</b><small>салюты есть/получ.</small></div>
         <div><b>${fmt(u.referrals)}</b><small>рефералов</small></div>
+        <div><b>${fmt(d.friends)}</b><small>друзей</small></div>
+        <div><b>${fmt(d.threads?.moves)}</b><small>ходов в нитях</small></div>
+        <div><b>${fmt(d.threads?.started)}</b><small>нитей начал</small></div>
+        <div><b>${fmt(d.invites)}</b><small>ссылок другу</small></div>
       </div>
+      ${d.threads?.pocket ? `<p class="muted small" style="margin-top:8px">🧵 В кармане нить <a href="#" data-thread="${esc(d.threads.pocket)}">${esc(d.threads.pocket)}</a>${d.threads.hidden ? ` · скрыто модерацией ходов: ${d.threads.hidden}` : ''}</p>` : d.threads?.hidden ? `<p class="muted small" style="margin-top:8px">🧵 Скрыто модерацией ходов: ${d.threads.hidden}</p>` : ''}
 
       <section><h3>Действия</h3>
         <div class="actions">
@@ -306,6 +331,12 @@
     } catch (e) { if (e.message !== 'login') toast('Не получилось: ' + e.message, true); }
   }
   $('drawer').onclick = e => {
+    const link = e.target.closest('[data-thread]');
+    if (link) { e.preventDefault(); openThread(link.dataset.thread); return; }
+    const ulink = e.target.closest('[data-user]');
+    if (ulink) { e.preventDefault(); openUser(ulink.dataset.user); return; }
+    const tb = e.target.closest('[data-tact]');
+    if (tb) { threadAct(tb.dataset.tact, tb.dataset.code, tb.dataset.n); return; }
     const b = e.target.closest('button');
     if (!b || !current) return;
     const name = current.user.name || current.user.id;
@@ -434,7 +465,7 @@
       ${row('Язык', c.lang)}
     </details>`).join('');
     const pct = (a, b) => b ? Math.round(100 * a / b) + '%' : '—';
-    const NAME = s => s === 'direct' ? 'Напрямую' : s === 'ref' ? 'Приглашения друзей' : s === 'duo' ? 'Duo-приглашения' : s === 'affiliate' ? '🤝 Партнёры Telegram (25%)' : s.startsWith('ad:') ? `📣 ${s.slice(3)}` : s.startsWith('room:') ? `📢 комната ${s.slice(5)}` : s;
+    const NAME = s => s === 'direct' ? 'Напрямую' : s === 'ref' ? 'Приглашения друзей' : s === 'invite' ? '📞 Ссылки в звонок' : s === 'thread' ? '🧵 Ссылки нитей' : s === 'duo' ? 'Duo-приглашения' : s === 'affiliate' ? '🤝 Партнёры Telegram (25%)' : s.startsWith('ad:') ? `📣 ${s.slice(3)}` : s.startsWith('room:') ? `📢 комната ${s.slice(5)}` : s;
     $('sources-table').innerHTML = `<thead><tr><th>Источник</th><th class="num">Лендинг: просмотры → клики</th><th class="num">/start в боте</th><th class="num">Открыли приложение</th><th class="num">Поговорили</th><th class="num">Вернулись</th><th class="num">Заплатили</th><th class="num">⭐</th></tr></thead><tbody>${
       d.sources.map(r => `<tr><td><b>${esc(NAME(r.source))}</b></td><td class="num">${r.landingViews ? `${fmt(r.landingViews)} → ${fmt(r.landingClicks)} <small class="muted">${pct(r.landingClicks, r.landingViews)}</small>` : '—'}</td><td class="num">${r.source.startsWith('ad:') || r.source === 'affiliate' ? fmt(r.botStarts) : '—'}</td><td class="num">${fmt(r.users)}</td>
         <td class="num">${fmt(r.talked)} <small class="muted">${pct(r.talked, r.users)}</small></td><td class="num">${fmt(r.returned)} <small class="muted">${pct(r.returned, r.users)}</small></td>
@@ -601,7 +632,8 @@
   };
 
   // ---------- Модерация ----------
-  const MOD = { nsfw: '🔞 NSFW', age_block: '🧒 Возраст', report: '⚑ Жалоба', admin_ban: '⛔ Бан админом', admin_unban: '✅ Разбан', jev_autoban: '⚖️ Автобан Jev', chat_block: '💬 Блок в чате' };
+  const MOD = { nsfw: '🔞 NSFW', age_block: '🧒 Возраст', report: '⚑ Жалоба', admin_ban: '⛔ Бан админом', admin_unban: '✅ Разбан', jev_autoban: '⚖️ Автобан Jev', chat_block: '💬 Блок в чате',
+    thread_hide: '🧵 Ход нити скрыт', no_frames: '📷 Нет кадров — разговор прерван', admin_thread_archive: '🧵 Нить в архив (админ)', admin_thread_hide: '🧵 Ход скрыт (админ)' };
   async function loadModeration() {
     const d = await api('moderation');
     $('mod-events').innerHTML = `<thead><tr><th>Событие</th><th>Кто</th><th>Детали</th><th>Когда</th></tr></thead><tbody>${
@@ -611,6 +643,62 @@
     $('mod-banned').innerHTML = `<thead><tr><th>Кто</th><th>Причина</th><th>Срок</th></tr></thead><tbody>${
       d.banned.map(u => `<tr class="click" data-id="${esc(u.id)}"><td>${esc(u.name || u.id)}${u.username ? ' <small class="muted">@' + esc(u.username) + '</small>' : ''}</td>
         <td>${esc(u.reason || '—')}</td><td class="muted">${until(u.bannedUntil)}</td></tr>`).join('') || '<tr><td colspan="3" class="empty">Никто не забанен</td></tr>'}</tbody>`;
+  }
+
+  // ---------- Нити ----------
+  const KIND = { story: '📖 История', question: '❓ Вопрос миру', wish: '💌 Пожелание' };
+  const TSTATUS = { live: '<span class="tag ok">в кармане</span>', pool: '<span class="tag warn">застряла</span>', done: '<span class="tag gold">завершена</span>', archived: '<span class="tag bad">архив</span>' };
+  async function loadThreads() {
+    const T = state.threads;
+    const d = await api('threads?' + new URLSearchParams({ status: T.status, kind: T.kind, limit: 200 }));
+    const B = d.byStatus;
+    $('threads-kpis').innerHTML = [kpi('В карманах', fmt(B.live || 0), 'живые нити', true), kpi('Застряли', fmt(B.pool || 0), 'ждут нового держателя'),
+      kpi('Завершены', fmt(B.done || 0), 'дошли до финала'), kpi('Архив', fmt(B.archived || 0), 'сроки, модерация, три неудачи')].join('');
+    $('threads-table').innerHTML = `<thead><tr><th>Нить</th><th>Ходы</th><th>Маршрут</th><th>Автор</th><th>Статус</th><th>Последний ход</th></tr></thead><tbody>${
+      d.threads.map(t => `<tr class="click" data-thread="${esc(t.code)}"><td><b>${KIND[t.kind] || esc(t.kind)}</b> <small class="muted">${esc(t.code)}</small></td>
+        <td class="num">${t.hops} / ${t.maxHops}${t.hidden ? ` <span class="tag bad">скрыто ${t.hidden}</span>` : ''}</td>
+        <td><span class="flags sm">${t.countries.map(flag).join(' ')}</span> <small class="muted">${t.countries.length}</small></td>
+        <td class="muted">${esc(t.starterName || t.starterId)}</td><td>${TSTATUS[t.status] || esc(t.status)}</td><td class="muted">${ago(t.lastAt)}</td></tr>`).join('')
+      || '<tr><td colspan="6" class="empty">Нитей пока нет</td></tr>'}</tbody>`;
+  }
+  $('thread-status').onclick = e => {
+    const b = e.target.closest('[data-s]'); if (!b) return;
+    state.threads.status = b.dataset.s;
+    for (const x of $('thread-status').children) x.classList.toggle('on', x === b);
+    loadThreads();
+  };
+  $('thread-kind').onchange = () => { state.threads.kind = $('thread-kind').value; loadThreads(); };
+  document.addEventListener('click', e => {
+    const row = e.target.closest('tr[data-thread]');
+    if (row && !e.target.closest('button')) openThread(row.dataset.thread);
+  });
+  async function openThread(code) {
+    const t = await api('threads/' + encodeURIComponent(code));
+    current = null;
+    $('drawer-body').innerHTML = `
+      <div class="who"><span class="ava" style="width:48px;height:48px;font-size:22px">🧵</span>
+        <div><h2>${KIND[t.kind] || esc(t.kind)} <small class="muted">${esc(t.code)}</small></h2><small class="muted">начата ${date(t.startedAt)}${t.finishedAt ? ' · завершена ' + date(t.finishedAt) : ''} · переводов в кэше: ${fmt(t.translations)}</small></div></div>
+      <div class="tags">${TSTATUS[t.status] || ''}<span class="tag">ход ${t.hops} из ${t.maxHops}</span><span class="tag">${t.countries.length} стран</span>${t.drops ? `<span class="tag warn">застревала ${t.drops}×</span>` : ''}
+        ${t.holderId ? `<span class="tag">держит <a href="#" data-user="${esc(t.holderId)}">${esc(t.holderId)}</a></span>` : ''}</div>
+      <section><h3>Действия</h3><div class="actions">
+        ${t.status === 'live' || t.status === 'pool' ? `<button class="btn danger sm" data-tact="archive" data-code="${esc(t.code)}">В архив</button>` : '<span class="muted small">нить завершена или в архиве</span>'}
+      </div></section>
+      <section><h3>Ходы · ${t.moves.length}</h3><div class="moves">${t.moves.map(m => `<div class="move${m.hidden ? ' hid' : ''}">
+        <span class="n">${m.n}</span><span class="fl">${flag(m.country)}</span>
+        <div class="txt"><b>${m.hidden ? '<i>скрыто модерацией</i>' : esc(m.text)}</b><small class="muted">${esc(m.name || m.userId)} · ${esc(m.lang || '?')} · ${date(m.at)}</small></div>
+        ${m.hidden ? '' : `<button class="btn ghost sm" data-tact="hide" data-code="${esc(t.code)}" data-n="${m.n}" title="Скрыть ход">Скрыть</button>`}
+      </div>`).join('')}</div></section>`;
+    $('scrim').hidden = $('drawer').hidden = false;
+  }
+  async function threadAct(action, code, n) {
+    const q = action === 'archive' ? 'Отправить нить в архив? Держатель потеряет её из кармана.' : `Скрыть ход ${n}? Текст пропадёт у всех, цепочка останется.`;
+    if (!confirm(q)) return;
+    try {
+      await api(`threads/${encodeURIComponent(code)}/${action}`, { method: 'POST', body: { n: Number(n) } });
+      toast('Готово');
+      await openThread(code);
+      if (state.page === 'threads') loadThreads();
+    } catch (e) { if (e.message !== 'login') toast('Не получилось: ' + e.message, true); }
   }
 
   // ---------- Комнаты ----------
@@ -632,13 +720,19 @@
       ['Адрес', `<a href="${esc(S.publicUrl)}" target="_blank" rel="noopener">${esc(S.publicUrl)}</a>`], ['Бот', yes(S.bot)], ['Модерация', yes(S.moderation)], ['TURN', yes(S.turn)],
       ['Работает', `${h} ч ${m} мин`], ['Память', `${S.memMb} МБ`], ['Node.js', esc(S.node)], ['Версия', esc(S.version || '—')],
       ['Aura Hour', o.live.event?.active ? '<span class="tag ok">идёт сейчас</span>' : esc(o.live.event?.time || '—')],
-      ['Duo сейчас', `${o.live.duos || 0} (в звонке ${o.live.duoInCall || 0})`],
+      ['Duo сейчас', `${o.live.duos || 0} (в поиске ${o.live.duoQueue || 0}, в звонке ${o.live.duoInCall || 0})`],
+      ['Нити', `в карманах ${fmt(o.live.threadsLive || 0)} · застряло ${fmt(o.live.threadsPool || 0)} · завершено ${fmt(o.live.threadsDone || 0)} · архив ${fmt(o.live.threadsArchived || 0)}`],
+      ['Эфиры стримеров', `${o.live.liveRooms || 0} (зрителей ${o.live.liveViewers || 0})`],
+      ['Вдвоём онлайн · ссылок другу открыто', `${o.live.pairOnline || 0} · ${o.live.invitesOpen || 0}`],
     ].map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join('');
     const NAMES = { appName: 'Название', publicUrl: 'Адрес', tzOffset: 'Часовой пояс, UTC+', freeFilterPerDay: 'Бесплатный фильтр в день', referralDays: 'Premium за друга, дней',
       streakRewardEvery: 'Награда за серию каждые, дней', rateMinSeconds: 'Оценка после разговора от, с', nsfwThreshold: 'Порог NSFW', minorThreshold: 'Порог возраста',
       ageBlockHours: 'Блок по возрасту, ч', frameIntervalMs: 'Кадр на модерацию, мс', strikesToBan: 'Страйков до бана', strikeBanHours: 'Бан за страйки, ч',
-      reportsToBan: 'Жалоб до бана', adminIds: 'Админы в боте', supportContact: 'Поддержка' };
-    $('sys-config').innerHTML = Object.entries(c).map(([k, v]) => `<tr><td>${esc(NAMES[k] || k)}</td><td>${esc(Array.isArray(v) ? v.join(', ') : v)}</td></tr>`).join('');
+      reportsToBan: 'Жалоб до бана', adminIds: 'Админы в боте', supportContact: 'Поддержка', eventTime: 'Aura Hour, время', eventMinutes: 'Aura Hour, минут', roundSeconds: 'Раунд Aura Hour, с',
+      crowdMin: '«Позовите» от, человек', exchangeHalfSec: 'Языковой обмен, с на язык', pairRelaxMs: '«Вдвоём» с одиночкой через, мс', duoConnTimeoutMs: 'Duo: ждать соединения, мс',
+      threadHops: 'Нити: ходов до финала', threadTtlDays: 'Нити: срок жизни, дней', threadStuckHours: 'Нити: в пул через, ч', prices: 'Цены, ⭐' };
+    const show = v => Array.isArray(v) ? v.join(', ') : v && typeof v === 'object' ? Object.entries(v).map(([k, x]) => `${k}: ${x}`).join(' · ') : v;
+    $('sys-config').innerHTML = Object.entries(c).map(([k, v]) => `<tr><td>${esc(NAMES[k] || k)}</td><td>${esc(show(v))}</td></tr>`).join('');
   }
 
   // ---------- Старт ----------

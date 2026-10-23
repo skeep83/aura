@@ -124,7 +124,7 @@ test('нити: перевод пакетом на язык читателя, к
   assert.deepEqual(ai.calls, [1, 3], 'для немецкого — все три хода одним запросом');
   assert.equal(fin.title, 'Заголовок');
   assert.equal(fin.days, 1);
-  assert.deepEqual(th.stats(), { threadsLive: 0, threadsPool: 0, threadsDone: 1 });
+  assert.deepEqual(th.stats(), { threadsLive: 0, threadsPool: 0, threadsDone: 1, threadsArchived: 0 });
 });
 
 test('нити: ИИ молчит дольше таймаута — карточка уходит с оригиналами, кэш не портится', async () => {

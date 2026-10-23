@@ -10,10 +10,14 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <defs><linearGradient id="g-main" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#36d1f0"/><stop offset=".5" stop-color="#4a86f7"/><stop offset="1" stop-color="#5a4ff0"/></linearGradient></defs>
+    <symbol id="i-spark" viewBox="0 0 24 24"><path d="M12 1.5c.5 4.9 2.3 7.6 6 9-3.7 1.4-5.5 4.1-6 9-.5-4.9-2.3-7.6-6-9 3.7-1.4 5.5-4.1 6-9Z"/><path d="M19.5 15.5c.2 1.8.9 2.8 2.3 3.3-1.4.5-2.1 1.5-2.3 3.3-.2-1.8-.9-2.8-2.3-3.3 1.4-.5 2.1-1.5 2.3-3.3Z" opacity=".6"/></symbol>
+  </svg>
   <!-- Вход -->
   <main id="login" class="login" hidden>
     <form class="card login-card" id="login-form">
-      <div class="logo">✦</div>
+      <div class="logo"><svg><use href="#i-spark"/></svg></div>
       <h1>Aura Admin</h1>
       <p class="muted" id="login-hint">Панель управления продакшеном</p>
       <input type="password" id="password" placeholder="Пароль" autocomplete="current-password" required>
@@ -25,13 +29,14 @@
   <!-- Панель -->
   <div id="app" class="shell" hidden>
     <aside class="side">
-      <div class="brand"><span class="logo sm">✦</span><b>Aura</b><small>admin</small></div>
+      <div class="brand"><span class="logo sm"><svg><use href="#i-spark"/></svg></span><b>Aura</b><small>admin</small></div>
       <nav id="nav">
         <a data-page="overview" class="on"><i>◎</i>Обзор</a>
         <a data-page="users"><i>👤</i>Пользователи</a>
         <a data-page="reports"><i>⚑</i>Жалобы<span class="badge" id="nav-reports" hidden></span></a>
         <a data-page="payments"><i>⭐</i>Платежи</a>
         <a data-page="moderation"><i>🛡</i>Модерация</a>
+        <a data-page="threads"><i>🧵</i>Нити</a>
         <a data-page="rooms"><i>📢</i>Комнаты</a>
         <a data-page="ads"><i>📣</i>Реклама</a>
         <a data-page="ai"><i>✨</i>ИИ</a>
@@ -61,12 +66,14 @@
           <div class="card"><div class="card-head"><h3>Активные пользователи</h3><div class="seg" id="range-seg"><button data-d="14">14 д</button><button data-d="30" class="on">30 д</button><button data-d="90">90 д</button></div></div><div class="chart" id="chart-users"></div><div class="legend"><span class="c1">DAU</span><span class="c2">Новые</span></div></div>
           <div class="card"><div class="card-head"><h3>Разговоры и минуты</h3></div><div class="chart" id="chart-talk"></div><div class="legend"><span class="c1">Разговоры</span><span class="c3">Минуты</span></div></div>
           <div class="card"><div class="card-head"><h3>Доход, ⭐</h3></div><div class="chart" id="chart-stars"></div></div>
-          <div class="card"><div class="card-head"><h3>Качество</h3></div><div class="chart" id="chart-quality"></div><div class="legend"><span class="c4">Не соединилось, %</span><span class="c5">Жалобы</span></div></div>
+          <div class="card"><div class="card-head"><h3>Качество</h3></div><div class="chart" id="chart-quality"></div><div class="legend"><span class="c4">Не соединилось, %</span><span class="c5">Жалобы</span><span class="c3">Камера не включилась</span></div></div>
+          <div class="card"><div class="card-head"><h3>Нити · приглашения · Duo</h3></div><div class="chart" id="chart-viral"></div><div class="legend"><span class="c1">Ходов нитей</span><span class="c2">Друзей по ссылке</span><span class="c4">Duo: не соединились</span></div></div>
+          <div class="card"><div class="card-head"><h3>Вирусные фичи · 7 дней</h3></div><table class="kv" id="viral"></table></div>
         </div>
         <div class="grid3">
           <div class="card"><h3>Воронка за сутки</h3><table class="kv" id="funnel"></table></div>
-          <div class="card"><h3>Вирусные фичи · 7 дней</h3><table class="kv" id="viral"></table></div>
           <div class="card"><h3>Аудитория</h3><div id="audience"></div></div>
+          <div class="card"><h3>Режимы и связи · 30 дней</h3><table class="kv" id="modes"></table><h3 style="margin-top:14px">Языки общения</h3><div id="chat-langs"></div></div>
         </div>
       </section>
 
@@ -102,6 +109,18 @@
           <div class="card flush"><div class="card-head pad"><h3>События</h3></div><table class="table" id="mod-events"></table></div>
           <div class="card flush"><div class="card-head pad"><h3>Сейчас в бане</h3></div><table class="table" id="mod-banned"></table></div>
         </div>
+      </section>
+
+      <!-- Нити -->
+      <section class="page" id="page-threads" hidden>
+        <div class="kpis" id="threads-kpis"></div>
+        <div class="toolbar">
+          <div class="seg" id="thread-status">
+            <button data-s="" class="on">Все</button><button data-s="live">В карманах</button><button data-s="pool">Застряли</button><button data-s="done">Завершены</button><button data-s="archived">Архив</button>
+          </div>
+          <select id="thread-kind"><option value="">Все типы</option><option value="story">📖 Истории</option><option value="question">❓ Вопросы</option><option value="wish">💌 Пожелания</option></select>
+        </div>
+        <div class="card flush"><table class="table" id="threads-table"></table></div>
       </section>
 
       <section class="page" id="page-rooms" hidden>

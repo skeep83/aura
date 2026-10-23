@@ -382,7 +382,29 @@ test('админ-API: без токена закрыт, с токеном — о
   const s = (await call('series?days=7')).data;
   assert.equal(s.length, 7);
   assert.ok(s.at(-1).matches >= 1);
+  assert.equal(s.at(-1).threadMoves, 0);
   assert.equal((await call('users/nope/ban', { method: 'POST', body: {} })).status, 400);
+
+  // Нити в админке: список, карточка, скрыть ход, архив; обзор и настройки с новыми данными
+  b.send({ t: 'thread_start', kind: 'wish', text: 'Удачи всем' });
+  const code = (await b.next('thread_pocket')).card.code;
+  const tl = (await call('threads?status=live')).data;
+  assert.equal(tl.threads[0].code, code);
+  assert.equal(tl.byStatus.live, 1);
+  const th = (await call(`threads/${code}`)).data;
+  assert.equal(th.moves.length, 1);
+  assert.equal(th.holderId, 'dev-adm-b');
+  assert.equal((await call(`threads/${code}/hide`, { method: 'POST', body: { n: 1 } })).data.ok, true);
+  assert.equal((await b.next('thread_pocket')).card, null, 'держатель узнал, что нить ушла');
+  assert.equal((await call(`threads/${code}`)).data.status, 'archived');
+  assert.equal((await call(`threads/${code}/archive`, { method: 'POST', body: {} })).data.ok, true);
+  const o2 = (await call('overview')).data;
+  assert.ok('pair' in o2.modes && Array.isArray(o2.chatLangs) && 'threadsArchived' in o2.live);
+  assert.equal(o2.viral.thread_start, 1);
+  const conf = (await call('config')).data;
+  assert.equal(conf.threadHops.story, 12);
+  assert.ok(conf.prices.month > 0);
+  assert.equal((await call('users/dev-adm-b')).data.threads.started, 1);
   b.ws.close();
 });
 

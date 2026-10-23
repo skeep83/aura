@@ -231,8 +231,8 @@ export function createThreads({
 
   function stats() {
     const n = status => get('SELECT COUNT(*) AS n FROM threads WHERE status = ?', status).n;
-    return { threadsLive: n('live'), threadsPool: n('pool'), threadsDone: n('done') };
+    return { threadsLive: n('live'), threadsPool: n('pool'), threadsDone: n('done'), threadsArchived: n('archived') };
   }
 
-  return { kinds, byId, byCode, holding, participated, participants, moves, route, startsLeft, start, take, finish, hideMove, offerFor, accept, release, tick, view, stats };
+  return { kinds, byId, byCode, holding, participated, participants, moves, route, startsLeft, start, take, finish, hideMove, archive, offerFor, accept, release, tick, view, stats };
 }

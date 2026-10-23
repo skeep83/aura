@@ -360,12 +360,22 @@ function kick(id, banned = true) {
 
 // Админ-API для панели на TrueNAS (/api/admin/*, Bearer ADMIN_API_TOKEN)
 const admin = createAdmin({
-  db, ai, jev, appLink, botUsername: () => cfg.botUsername || bot_?.username || '', token: env.ADMIN_API_TOKEN || '',
+  db, ai, jev, threads, appLink, botUsername: () => cfg.botUsername || bot_?.username || '', token: env.ADMIN_API_TOKEN || '',
   cfg: {
     ...cfg, moderationUrl: env.MODERATION_URL || '', nsfwThreshold: Number(env.NSFW_THRESHOLD || 0.85),
     minorThreshold: Number(env.MINOR_THRESHOLD || 0.8),
+    eventTime: env.EVENT_TIME || '21:00', eventMinutes: Number(env.EVENT_MINUTES || 60), roundSeconds: Number(env.ROUND_SECONDS || 180),
+    crowdMin: CROWD_MIN, exchangeHalfSec: EXCHANGE_HALF_SEC, pairRelaxMs: Number(env.PAIR_RELAX_MS || 25_000), duoConnTimeoutMs: Number(env.DUO_CONN_TIMEOUT_MS || 20_000),
+    threadHops: Object.fromEntries(Object.entries(threadKinds).map(([k, v]) => [k, v.maxHops])), threadTtlDays: Number(env.THREAD_TTL_DAYS || 7), threadStuckHours: Number(env.THREAD_STUCK_HOURS || 48),
+    prices: Object.fromEntries(Object.entries(plans).map(([k, p]) => [k, p.stars])),
   },
-  live: () => ({ online: clients.size, ...mm.stats(), ...duos.stats(), event: eventInfo() }),
+  live: () => {
+    let pairOnline = 0;
+    for (const c of clients.values()) if (c.pair) pairOnline++;
+    return { online: clients.size, ...mm.stats(), ...duos.stats(), ...threads.stats(), ...live.stats(), pairOnline, invitesOpen: invites.size, event: eventInfo() };
+  },
+  // Нить ушла в архив из админки — у держателя пустой карман
+  onThreadPocket: id => clients.get(id)?.send({ t: 'thread_pocket', card: null }),
   isOnline: id => clients.has(id),
   kick,
   refresh: id => {

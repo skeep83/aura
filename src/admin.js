@@ -6,7 +6,7 @@ const DAY = 24 * 60 * 60 * 1000;
 const HOUR = 60 * 60 * 1000;
 const FOREVER = 8.64e15;
 
-export function createAdmin({ db, ai, jev, appLink = () => '', botUsername = () => '', cfg, token, live, isOnline, kick, refresh, refund, notify, startedAt = Date.now() }) {
+export function createAdmin({ db, ai, jev, threads = null, appLink = () => '', botUsername = () => '', cfg, token, live, isOnline, kick, refresh, refund, notify, onThreadPocket = () => {}, startedAt = Date.now() }) {
   const sql = db.db;
   const all = (q, ...a) => sql.prepare(q).all(...a);
   const get = (q, ...a) => sql.prepare(q).get(...a);
@@ -31,7 +31,7 @@ export function createAdmin({ db, ai, jev, appLink = () => '', botUsername = () 
     bannedUntil: u.banned_until, banReason: u.ban_reason, strikes: u.strikes,
     aura: auraOf(u), karmaUp: u.karma_up, karmaDown: u.karma_down, streak: u.streak,
     referrals: u.referrals, referredBy: u.referred_by, salutes: u.salutes, salutesReceived: u.salutes_received,
-    reveal: Boolean(u.reveal), allowsPm: Boolean(u.allows_pm), online: isOnline(u.id),
+    reveal: Boolean(u.reveal), pair: Boolean(u.pair), exchange: u.ex_native ? { native: u.ex_native, learn: u.ex_learn } : null, allowsPm: Boolean(u.allows_pm), online: isOnline(u.id),
     reports: get('SELECT COUNT(*) AS n FROM reports WHERE target = ?', u.id).n,
   });
 
@@ -44,10 +44,11 @@ export function createAdmin({ db, ai, jev, appLink = () => '', botUsername = () 
     const rows = Array.from({ length: days }, (_, i) => ({
       day: new Date(start + i * DAY + tz).toISOString().slice(0, 10),
       dau: 0, newUsers: 0, matches: 0, talkMin: 0, stars: 0, reports: 0, connOk: 0, connFail: 0, vibes: 0, compliments: 0, duoCalls: 0,
+      threadMoves: 0, threadsDone: 0, invites: 0, duoFail: 0, camFail: 0, noFrames: 0,
     }));
     const add = (at, key, v = 1) => { const i = dayOf(at); if (i >= 0 && i < days) rows[i][key] += v; };
     const users = new Map();
-    for (const e of all("SELECT type, user_id, value, at FROM events WHERE at >= ? AND type IN ('session','match','talk','report','conn_ok','conn_fail','vibe_match','compliment','duo_call')", start)) {
+    for (const e of all("SELECT type, user_id, value, at FROM events WHERE at >= ? AND type IN ('session','match','talk','report','conn_ok','conn_fail','vibe_match','compliment','duo_call','thread_move','thread_start','thread_done','invite_join','duo_conn_fail','cam_fail','no_frames')", start)) {
       switch (e.type) {
         case 'session': { const k = `${dayOf(e.at)}:${e.user_id}`; if (!users.has(k)) { users.set(k, 1); add(e.at, 'dau'); } break; }
         case 'match': add(e.at, 'matches'); break;
@@ -58,6 +59,12 @@ export function createAdmin({ db, ai, jev, appLink = () => '', botUsername = () 
         case 'vibe_match': add(e.at, 'vibes', 0.5); break;
         case 'compliment': add(e.at, 'compliments'); break;
         case 'duo_call': add(e.at, 'duoCalls'); break;
+        case 'thread_move': case 'thread_start': add(e.at, 'threadMoves'); break;
+        case 'thread_done': add(e.at, 'threadsDone'); break;
+        case 'invite_join': add(e.at, 'invites'); break;
+        case 'duo_conn_fail': add(e.at, 'duoFail'); break;
+        case 'cam_fail': add(e.at, 'camFail'); break;
+        case 'no_frames': add(e.at, 'noFrames'); break;
       }
     }
     for (const u of all('SELECT created_at FROM users WHERE created_at >= ?', start)) add(u.created_at, 'newUsers');
@@ -99,6 +106,14 @@ export function createAdmin({ db, ai, jev, appLink = () => '', botUsername = () 
       rooms: all('SELECT slug, title, visits, matches FROM rooms WHERE owner_id = ?', id),
       events: all("SELECT type, value, tag, at FROM events WHERE user_id = ? ORDER BY at DESC LIMIT 60", id),
       wrapped: db.wrapped(id),
+      friends: get('SELECT COUNT(*) AS n FROM friends WHERE a = ?', id).n,
+      invites: get("SELECT COUNT(*) AS n FROM events WHERE type = 'invite_open' AND user_id = ?", id).n,
+      threads: threads ? {
+        pocket: threads.holding(id)?.code || null,
+        started: get('SELECT COUNT(*) AS n FROM threads WHERE starter_id = ?', id).n,
+        moves: get('SELECT COUNT(*) AS n FROM thread_moves WHERE user_id = ?', id).n,
+        hidden: get('SELECT COUNT(*) AS n FROM thread_moves WHERE user_id = ? AND hidden = 1', id).n,
+      } : null,
     };
   }
 
@@ -180,7 +195,7 @@ export function createAdmin({ db, ai, jev, appLink = () => '', botUsername = () 
   function moderation({ limit = 150 }) {
     const events = all(`SELECT e.type, e.user_id AS userId, e.value, e.tag, e.at, u.name, u.username, u.banned_until AS bannedUntil
       FROM events e LEFT JOIN users u ON u.id = e.user_id
-      WHERE e.type IN ('nsfw','age_block','report','admin_ban','admin_unban','jev_autoban','chat_block') ORDER BY e.at DESC LIMIT ?`, Math.min(500, Number(limit) || 150));
+      WHERE e.type IN ('nsfw','age_block','report','admin_ban','admin_unban','jev_autoban','chat_block','thread_hide','no_frames','admin_thread_archive','admin_thread_hide') ORDER BY e.at DESC LIMIT ?`, Math.min(500, Number(limit) || 150));
     const banned = all('SELECT id, name, username, banned_until AS bannedUntil, ban_reason AS reason FROM users WHERE banned_until > ? ORDER BY banned_until DESC LIMIT 200', Date.now());
     return { events, banned };
   }
@@ -192,10 +207,23 @@ export function createAdmin({ db, ai, jev, appLink = () => '', botUsername = () 
     const genders = all('SELECT gender, COUNT(*) AS n FROM users GROUP BY gender');
     const week = get("SELECT COUNT(DISTINCT user_id) AS n FROM events WHERE type = 'session' AND at > ?", now - 7 * DAY).n;
     const month = get("SELECT COUNT(DISTINCT user_id) AS n FROM events WHERE type = 'session' AND at > ?", now - 30 * DAY).n;
-    const viral = Object.fromEntries(['guess_ok', 'compliment', 'salute', 'salute_buy', 'duo_create', 'duo_call', 'vibe_match']
+    const viral = Object.fromEntries(['guess_ok', 'compliment', 'salute', 'salute_buy', 'duo_create', 'duo_call', 'duo_conn_fail', 'vibe_match',
+      'thread_start', 'thread_move', 'thread_done', 'thread_accept', 'invite_open', 'invite_join', 'invite_miss', 'friend_call_ok', 'live_start', 'live_join', 'share_prepare', 'ai_topic']
       .map(t => [t, get('SELECT COUNT(*) AS n FROM events WHERE type = ? AND at > ?', t, now - 7 * DAY).n]));
+    // Языки общения (профиль, через запятую) — по всем пользователям, заходившим за 30 дней
+    const chatLangs = {};
+    for (const r of all("SELECT langs FROM users WHERE langs != '' AND last_seen > ?", now - 30 * DAY)) for (const l of r.langs.split(',')) if (l) chatLangs[l] = (chatLangs[l] || 0) + 1;
+    const modes = {
+      pair: get('SELECT COUNT(*) AS n FROM users WHERE pair = 1 AND last_seen > ?', now - 30 * DAY).n,
+      reveal: get('SELECT COUNT(*) AS n FROM users WHERE reveal = 1 AND last_seen > ?', now - 30 * DAY).n,
+      exchange: get("SELECT COUNT(*) AS n FROM users WHERE ex_native != '' AND last_seen > ?", now - 30 * DAY).n,
+      notify: get('SELECT COUNT(*) AS n FROM users WHERE notify_events = 1 AND allows_pm = 1 AND last_seen > ?', now - 30 * DAY).n,
+      friendsPairs: get('SELECT COUNT(*) AS n FROM friends').n / 2,
+    };
     return {
-      live: live(), totals: db.stats(), funnel: db.funnel(), wau: week, mau: month, countries, langs, genders, viral,
+      live: live(), totals: db.stats(), funnel: db.funnel(), wau: week, mau: month, countries, genders, viral, modes,
+      langs, chatLangs: Object.entries(chatLangs).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([lang, n]) => ({ lang, n })),
+      threads: threads ? { ...threads.stats(), byKind: all("SELECT kind, COUNT(*) AS n, SUM(hops) AS hops FROM threads WHERE status != 'archived' GROUP BY kind") } : null,
       system: {
         startedAt, uptimeSec: Math.round((now - startedAt) / 1000), node: process.version, memMb: Math.round(process.memoryUsage().rss / 1048576),
         moderation: Boolean(cfg.moderationUrl), turn: Boolean(cfg.turnSecret || cfg.cfTurnKeyId), bot: Boolean(cfg.botToken),
@@ -205,7 +233,8 @@ export function createAdmin({ db, ai, jev, appLink = () => '', botUsername = () 
   }
 
   function config() {
-    const pick = ['appName', 'publicUrl', 'tzOffset', 'freeFilterPerDay', 'referralDays', 'streakRewardEvery', 'rateMinSeconds',
+    const pick = ['appName', 'publicUrl', 'tzOffset', 'eventTime', 'eventMinutes', 'roundSeconds', 'freeFilterPerDay', 'referralDays', 'streakRewardEvery', 'rateMinSeconds',
+      'crowdMin', 'exchangeHalfSec', 'pairRelaxMs', 'duoConnTimeoutMs', 'threadHops', 'threadTtlDays', 'threadStuckHours', 'prices',
       'nsfwThreshold', 'minorThreshold', 'ageBlockHours', 'frameIntervalMs', 'strikesToBan', 'strikeBanHours', 'reportsToBan', 'adminIds', 'supportContact'];
     return Object.fromEntries(pick.filter(k => k in cfg).map(k => [k, cfg[k]]));
   }
@@ -213,6 +242,54 @@ export function createAdmin({ db, ai, jev, appLink = () => '', botUsername = () 
   function rooms() {
     return all(`SELECT r.slug, r.title, r.owner_id AS ownerId, r.visits, r.matches, r.created_at AS createdAt, u.username AS ownerUsername
       FROM rooms r LEFT JOIN users u ON u.id = r.owner_id ORDER BY r.visits DESC LIMIT 200`);
+  }
+
+  // ---------- Нити ----------
+  const KIND_HOPS = th => th.max_hops;
+  function threadRow(t) {
+    const ms = all('SELECT country, user_id, hidden, at FROM thread_moves WHERE thread_id = ? ORDER BY n', t.id);
+    return {
+      code: t.code, kind: t.kind, status: t.status, hops: t.hops, maxHops: KIND_HOPS(t), startedAt: t.started_at, finishedAt: t.finished_at || 0,
+      lastAt: ms.at(-1)?.at || t.started_at, countries: [...new Set(ms.map(m => m.country).filter(Boolean))], hidden: ms.filter(m => m.hidden).length,
+      starterId: t.starter_id, starterName: t.starterName || '', holderId: t.holder_id || '', drops: t.drops,
+    };
+  }
+  function threadList({ status = '', kind = '', limit = 100 }) {
+    const where = ['1 = 1'], args = [];
+    if (['live', 'pool', 'done', 'archived'].includes(status)) { where.push('t.status = ?'); args.push(status); }
+    if (['story', 'question', 'wish'].includes(kind)) { where.push('t.kind = ?'); args.push(kind); }
+    const rows = all(`SELECT t.*, u.name AS starterName FROM threads t LEFT JOIN users u ON u.id = t.starter_id WHERE ${where.join(' AND ')}
+      ORDER BY t.started_at DESC LIMIT ?`, ...args, Math.min(500, Number(limit) || 100));
+    const byStatus = Object.fromEntries(all('SELECT status, COUNT(*) AS n FROM threads GROUP BY status').map(r => [r.status, r.n]));
+    return { threads: rows.map(threadRow), byStatus };
+  }
+  function threadDetail(code) {
+    const t = get('SELECT t.*, u.name AS starterName FROM threads t LEFT JOIN users u ON u.id = t.starter_id WHERE t.code = ?', String(code || ''));
+    if (!t) return null;
+    const moves = all(`SELECT m.n, m.user_id AS userId, u.name, m.country, m.lang, m.text, m.hidden, m.at FROM thread_moves m LEFT JOIN users u ON u.id = m.user_id
+      WHERE m.thread_id = ? ORDER BY m.n`, t.id);
+    return { ...threadRow(t), moves, translations: get('SELECT COUNT(*) AS n FROM thread_tr WHERE thread_id = ?', t.id).n };
+  }
+  function threadAct(code, action, body) {
+    const t = get('SELECT * FROM threads WHERE code = ?', String(code || ''));
+    if (!t || !threads) return { error: 'not_found' };
+    if (action === 'archive') {
+      const holder = t.holder_id;
+      threads.archive(t.id);
+      if (holder) onThreadPocket(holder);
+      db.event('admin_thread_archive', t.starter_id, t.hops, t.code);
+      return { ok: true };
+    }
+    if (action === 'hide') {
+      const n = Number(body.n);
+      if (!get('SELECT 1 FROM thread_moves WHERE thread_id = ? AND n = ?', t.id, n)) return { error: 'not_found' };
+      const holder = t.holder_id;
+      threads.hideMove(t.id, n);
+      if (n === 1 && holder) onThreadPocket(holder);
+      db.event('admin_thread_hide', t.starter_id, n, t.code);
+      return { ok: true };
+    }
+    return { error: 'unknown_action' };
   }
 
   async function readJson(req) {
@@ -248,6 +325,10 @@ export function createAdmin({ db, ai, jev, appLink = () => '', botUsername = () 
           case 'payments': return send(200, payments(qs)), true;
           case 'moderation': return send(200, moderation(qs)), true;
           case 'rooms': return send(200, rooms()), true;
+          case 'threads': {
+            if (parts[1]) { const d = threadDetail(parts[1]); return send(d ? 200 : 404, d || { error: 'not_found' }), true; }
+            return send(200, threadList(qs)), true;
+          }
           case 'config': return send(200, config()), true;
           case 'ai': return send(200, ai.publicConfig()), true;
           case 'jev': return send(200, jev.publicConfig()), true;
@@ -262,6 +343,11 @@ export function createAdmin({ db, ai, jev, appLink = () => '', botUsername = () 
         if (parts[0] === 'users' && parts[1] && parts[2]) {
           const r = act(parts[1], parts[2], body);
           console.log(`admin: ${parts[2]} ${parts[1]}${r.error ? ' → ' + r.error : ''}`);
+          return send(r.error ? 400 : 200, r), true;
+        }
+        if (parts[0] === 'threads' && parts[1] && parts[2]) {
+          const r = threadAct(parts[1], parts[2], body);
+          console.log(`admin: thread ${parts[2]} ${parts[1]}${r.error ? ' → ' + r.error : ''}`);
           return send(r.error ? 400 : 200, r), true;
         }
         if (parts[0] === 'jev') {
