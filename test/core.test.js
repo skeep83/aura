@@ -296,3 +296,18 @@ test('языковой обмен: зеркальная пара сразу, о�
   mm2.tick(t0 + 26_000);
   assert.equal(mm2.peerOf(c), en); // носитель изучаемого языка, а не русскоязычный
 });
+
+test('вдвоём с одного телефона: сначала только с такими же двоими, с одиночкой — после ожидания, и тот узнаёт, что их двое', () => {
+  const mm = new Matchmaker({ pairRelaxMs: 25_000 });
+  const pair = mk('p', { pair: true }), single = mk('s'), pair2 = mk('p2', { pair: true });
+  mm.enqueue(pair, 0); mm.enqueue(single, 0);
+  assert.equal(mm.peerOf(pair), null, 'двое и одиночка сразу не сводятся');
+  mm.enqueue(pair2, 1000);
+  assert.equal(mm.peerOf(pair2), pair, 'двое с двоими — сразу');
+  const matched = pair2.inbox.at(-1);
+  assert.equal(matched, 'matched');
+  mm.leave(pair); mm.leave(pair2);
+  mm.enqueue(pair, 2000);
+  mm.tick(30_000);
+  assert.equal(mm.peerOf(single), pair, 'после ожидания одиночка получает двоих');
+});

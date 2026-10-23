@@ -167,6 +167,7 @@ function finishGuess(c, pick) {
 
 // ---------- Матчинг: что происходит при начале и конце разговора ----------
 const duos = new DuoManager({
+  connTimeoutMs: Number(env.DUO_CONN_TIMEOUT_MS || 20_000),
   onGroupEnd(g, ms) {
     for (const m of g.members) db.event('talk', m.c.id, ms);
     db.event('duo_call', '', ms);
@@ -174,24 +175,24 @@ const duos = new DuoManager({
 });
 
 const mm = new Matchmaker({
+  pairRelaxMs: Number(env.PAIR_RELAX_MS || 25_000),
   peerInfo(self, o, common) {
     clearTimeout(self.guess?.timer);
     self.guess = null;
+    // pair — собеседников двое перед одним телефоном
+    const base = { gender: o.gender, langs: common, country: o.country || null, pair: Boolean(o.pair) };
     // Звонок другу или стримеру: собеседник известен, игра «Угадай» не нужна
     if (self.direct) {
       const hideName = self.direct === 'live' && self.live?.role === 'host'; // имя зрителя не попадает в трансляцию
-      return { gender: o.gender, langs: common, country: o.country || null, direct: self.direct, name: hideName ? '' : o.name || '' };
+      return { ...base, direct: self.direct, name: hideName ? '' : o.name || '' };
     }
     const exchange = exchangeInfo(self, o);
-    if (exchange) {
-      const base = { gender: o.gender, langs: common, country: o.country || null, exchange };
-      return base;
-    }
+    if (exchange) return { ...base, exchange };
     if (self.country && o.country && self.country !== o.country) {
       self.guess = { answer: o.country, options: guessOptions(o.country, self.country), done: false, stamp: null };
-      return { gender: o.gender, langs: common, country: null, guess: { options: self.guess.options, seconds: GUESS_MS / 1000 } };
+      return { ...base, country: null, guess: { options: self.guess.options, seconds: GUESS_MS / 1000 } };
     }
-    return { gender: o.gender, langs: common, country: o.country || null };
+    return base;
   },
   onPair(a, b, now, waits = [0, 0]) {
     [a, b].forEach((c, i) => db.event('match', c.id, waits[i], c.newbie ? 'newbie' : ''));
@@ -310,7 +311,7 @@ function profileOf(c) {
     filterLeft: c.premium ? null : db.filterLeft(c.id, today(), cfg.freeFilterPerDay),
     notifyEvents: Boolean(u.notify_events), allowsPm: Boolean(u.allows_pm),
     refLink: appLink(`ref_${db.refCode(c.id)}`), shareLink: `${cfg.publicUrl || ''}/r/${db.refCode(c.id)}`, referrals: u.referrals,
-    reveal: Boolean(c.reveal), country: c.country || null, passport: db.passport(c.id),
+    reveal: Boolean(c.reveal), pair: Boolean(c.pair), country: c.country || null, passport: db.passport(c.id),
     salutes: u.salutes, salutesReceived: u.salutes_received, compliments: db.complimentsOf(c.id),
     crowd: u.crowd_until > Date.now(), crowdMin: CROWD_MIN,
   };
@@ -760,7 +761,7 @@ wss.on('connection', (ws, req) => {
       exchange: validExchange({ native: u.ex_native, learn: u.ex_learn }),
       premium: db.isPremium(u), room, tier: auraOf(u).tier, vibe: null, rateTarget: null,
       matches: db.matchCount(user.id),
-      reveal: Boolean(u.reveal), country: /^[A-Z]{2}$/.test(country) && !['XX', 'T1'].includes(country) ? country
+      reveal: Boolean(u.reveal), pair: Boolean(u.pair), country: /^[A-Z]{2}$/.test(country) && !['XX', 'T1'].includes(country) ? country
         : cfg.devAnon && /^[A-Z]{2}$/.test(msg.devCountry || '') ? msg.devCountry : '',
       minorHist: [], fromTelegram: !user.web && !String(user.id).startsWith('dev-') || (cfg.devAnon && !user.web),
       send, close: reason => ws.close(4005, reason),
@@ -1004,6 +1005,13 @@ wss.on('connection', (ws, req) => {
       case 'duo_signal':
         if (msg.data && typeof msg.data === 'object') duos.relay(client, msg.to, msg.data);
         break;
+      case 'duo_conn': {
+        // Итог WebRTC с участником слота: все соединились — группа живёт; отвал — распадается, обе Duo ищут дальше
+        const r = duos.conn(client, msg.to, Boolean(msg.ok));
+        if (r === 'failed') { db.event('duo_conn_fail', client.id, 0, String(msg.why || '').replace(/[^a-z_]/g, '').slice(0, 20)); console.log(`duo conn FAIL ${client.id} -> slot ${msg.to} (${msg.why || '?'})`); }
+        else if (r === 'all') db.event('duo_conn_ok', client.id);
+        break;
+      }
     }
   }
 
@@ -1156,6 +1164,7 @@ wss.on('connection', (ws, req) => {
         }
         if (typeof msg.notifyEvents === 'boolean') db.setNotify(client.id, msg.notifyEvents);
         if (typeof msg.reveal === 'boolean') { client.reveal = msg.reveal; db.setReveal(client.id, msg.reveal); }
+        if (typeof msg.pair === 'boolean' && msg.pair !== Boolean(client.pair)) { client.pair = msg.pair; db.setPair(client.id, msg.pair); db.event(msg.pair ? 'pair_on' : 'pair_off', client.id); }
         db.setProfile(client.id, { ...client, langs: client.baseLangs });
         send({ t: 'me', me: profileOf(client) });
         break;
@@ -1395,7 +1404,7 @@ wss.on('connection', (ws, req) => {
         break;
       }
       case 'duo_create': case 'duo_join': case 'duo_search': case 'duo_next':
-      case 'duo_stop': case 'duo_leave': case 'duo_signal':
+      case 'duo_stop': case 'duo_leave': case 'duo_signal': case 'duo_conn':
         onDuo(msg);
         break;
       case 'thread_start': case 'thread_show': case 'thread_take': case 'thread_skip':

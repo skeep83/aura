@@ -36,6 +36,7 @@ const USER_COLUMNS = {
   ex_native: "TEXT NOT NULL DEFAULT ''",          // языковой обмен: мой язык
   ex_learn: "TEXT NOT NULL DEFAULT ''",           // языковой обмен: учу
   threads_seen: 'INTEGER NOT NULL DEFAULT 0',     // сколько раз человек видел карточку нити (подсказки — первые три раза)
+  pair: 'INTEGER NOT NULL DEFAULT 0',             // «вдвоём с одного телефона»
 };
 
 // Пользователи, жалобы, платежи, комнаты, оценки. SQLite в одном файле — хватает на один процесс.
@@ -152,6 +153,7 @@ export class Db {
     this.db.prepare('UPDATE users SET ex_native = ?, ex_learn = ? WHERE id = ?').run(ex?.native || '', ex?.learn || '', id);
   }
   setReveal(id, on) { this.db.prepare('UPDATE users SET reveal = ? WHERE id = ?').run(on ? 1 : 0, id); }
+  setPair(id, on) { this.db.prepare('UPDATE users SET pair = ? WHERE id = ?').run(on ? 1 : 0, id); }
   setCountry(id, country) { this.db.prepare('UPDATE users SET country = ? WHERE id = ?').run(country, id); }
 
   // ---------- Паспорт: страны, с которыми поговорил ----------

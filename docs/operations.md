@@ -66,7 +66,7 @@
 | `duos`, `duoQueue`, `duoInCall` | Duo сейчас: всего / в поиске / в звонке |
 | `threadsLive`, `threadsPool`, `threadsDone` | нити: в карманах / в пуле (застрявшие) / завершённые |
 
-Вирусные фичи пишут свои события (`guess_ok`, `compliment`, `salute`, `salute_buy`, `duo_create`, `duo_join`, `duo_call`, `thread_start`, `thread_show`, `thread_move`, `thread_done`, `thread_accept`, `thread_drop`, `thread_hide`) — по ним видно, что «залетает». Недельные итоги уходят в воскресенье в 19:00; отметка последней рассылки — `data/wrapped.week`.
+Вирусные фичи пишут свои события (`guess_ok`, `compliment`, `salute`, `salute_buy`, `duo_create`, `duo_join`, `duo_call`, `thread_start`, `thread_show`, `thread_move`, `thread_done`, `thread_accept`, `thread_drop`, `thread_hide`, `pair_on`/`pair_off`, `duo_conn_ok`/`duo_conn_fail`) — по ним видно, что «залетает». Недельные итоги уходят в воскресенье в 19:00; отметка последней рассылки — `data/wrapped.week`.
 
 События пишутся в таблицу `events` — можно строить любые срезы SQL-запросами.
 

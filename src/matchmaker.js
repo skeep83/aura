@@ -4,15 +4,17 @@ import { shareLang } from './langs.js';
 // Клиент: { id, gender: 'm'|'f'|'x', want: 'any'|'m'|'f', premium, langs: ['ru',…], room: slug|null,
 //           tier: 'low'|'ok' (по ауре), send(msg) }.
 // Мягкие ограничения ослабевают со временем ожидания, чтобы при малом онлайне никто не зависал:
-//   повтор с последним собеседником — после rematchAfterMs, смешение уровней ауры — после tierRelaxMs.
+//   повтор с последним собеседником — после rematchAfterMs, смешение уровней ауры — после tierRelaxMs,
+//   «вдвоём с одного телефона» (pair) с одиночками — после pairRelaxMs (собеседник узнаёт, что их двое).
 // Жёсткие — никогда: общий язык, одна комната, фильтр по полу.
 const wants = (a, b) => a.want === 'any' || a.want === b.gender;
 export const exchangeMirror = (a, b) => Boolean(a.exchange && b.exchange
   && a.exchange.native === b.exchange.learn && b.exchange.native === a.exchange.learn);
 
 export class Matchmaker {
-  constructor({ rematchAfterMs = 10_000, tierRelaxMs = 15_000, newbieRelaxMs = 40_000, exchangeRelaxMs = 25_000, onPair = () => {}, onUnpair = () => {}, peerInfo = null } = {}) {
+  constructor({ rematchAfterMs = 10_000, tierRelaxMs = 15_000, newbieRelaxMs = 40_000, exchangeRelaxMs = 25_000, pairRelaxMs = 25_000, onPair = () => {}, onUnpair = () => {}, peerInfo = null } = {}) {
     this.newbieRelaxMs = newbieRelaxMs;
+    this.pairRelaxMs = pairRelaxMs;
     this.exchangeRelaxMs = exchangeRelaxMs;
     // peerInfo(self, other, common) → что клиент self узнаёт о собеседнике (сервер прячет страну на время игры «Угадай»)
     this.peerInfo = peerInfo;
@@ -48,6 +50,8 @@ export class Matchmaker {
     if (((a.newbie && b.tier === 'low') || (b.newbie && a.tier === 'low')) && !both(this.newbieRelaxMs)) return false;
     // Режим «Сначала голос» — сводим одинаковых, смешиваем только если оба долго ждут
     if (Boolean(a.reveal) !== Boolean(b.reveal) && !both(this.tierRelaxMs)) return false;
+    // Двое перед одним телефоном — сначала только с такими же двоими, с одиночкой лишь после долгого ожидания
+    if (Boolean(a.pair) !== Boolean(b.pair) && !both(this.pairRelaxMs)) return false;
     const recent = this.lastPeer.get(a.id) === b.id || this.lastPeer.get(b.id) === a.id;
     return !recent || both(this.rematchAfterMs);
   }
@@ -58,6 +62,7 @@ export class Matchmaker {
     let s = o.premium ? 100 : 0;
     if (client.newbie) s += (o.good ? 50 : 0) + (o.newbie ? 0 : 20);
     if (o.newbie && client.good) s += 10;
+    if (client.pair && o.pair) s += 30;
     return s;
   }
   pick(client, now, from = this.waiting) {
@@ -85,7 +90,7 @@ export class Matchmaker {
     const reveal = Boolean(initiator.reveal && other.reveal);
     const describe = (self, o) => this.peerInfo
       ? this.peerInfo(self, o, common)
-      : { gender: o.gender, langs: common, country: o.country || null };
+      : { gender: o.gender, langs: common, country: o.country || null, pair: Boolean(o.pair) };
     initiator.send({ t: 'matched', initiator: true, reveal, peer: describe(initiator, other) });
     other.send({ t: 'matched', initiator: false, reveal, peer: describe(other, initiator) });
     this.onPair(initiator, other, now, waits);

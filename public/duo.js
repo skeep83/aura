@@ -3,6 +3,7 @@
 // Битрейт видео ограничен: исходящих потоков три, а мобильный аплинк небольшой.
 window.AuraDuo = (() => {
   const MAX_BITRATE = 700_000; // на каждый из трёх исходящих потоков
+  const CONNECT_MS = 15_000;   // не соединились за это время — сообщаем серверу, группа распадается и обе Duo ищут дальше
 
   function create({ send, getIce, getTracks, grid, onConnected, onAllGone, flagOf }) {
     let you = null;
@@ -48,8 +49,16 @@ window.AuraDuo = (() => {
     function connect(info) {
       const pc = new RTCPeerConnection({ iceServers: getIce() });
       const { tile, video } = tileFor(info.slot, info);
-      const peer = { pc, video, tile, pending: [], connected: false };
+      const peer = { pc, video, tile, pending: [], connected: false, reported: false, timer: null };
       peers.set(info.slot, peer);
+      // Итог соединения — один раз: соединились, не успели или отвалились
+      const report = (ok, why) => {
+        if (peer.reported) return;
+        peer.reported = true;
+        clearTimeout(peer.timer);
+        send({ t: 'duo_conn', to: info.slot, ok, why });
+      };
+      peer.timer = setTimeout(() => { if (!peer.connected) report(false, 'timeout'); }, CONNECT_MS);
       grid.append(tile);
       for (const t of getTracks()) pc.addTrack(t.track, t.stream);
       pc.ontrack = e => { if (video.srcObject !== e.streams[0]) { video.srcObject = e.streams[0]; playTile(video); } };
@@ -59,9 +68,12 @@ window.AuraDuo = (() => {
           peer.connected = true;
           tile.classList.add('live');
           capBitrate(pc);
+          report(true);
           onConnected?.();
         } else if (pc.connectionState === 'failed') {
           tile.classList.add('lost');
+          peer.reported = false; // отвал после успешного соединения тоже важен
+          report(false, 'failed');
         }
       };
       if (you < info.slot) {
@@ -126,6 +138,7 @@ window.AuraDuo = (() => {
 
     function stop() {
       for (const p of peers.values()) {
+        clearTimeout(p.timer);
         p.pc.ontrack = p.pc.onicecandidate = p.pc.onconnectionstatechange = null;
         p.pc.close();
       }

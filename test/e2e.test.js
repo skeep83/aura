@@ -670,3 +670,47 @@ test('Нити: старт в звонке показывается собесе
   assert.equal(me.me.aura, 102, '+1 за каждый чужой ход');
   for (const x of [a, b2, c]) x.ws.close();
 });
+
+test('Вдвоём с одного телефона: двое ждут таких же, с одиночкой — после паузы, собеседник видит pair', async t => {
+  const port = await startServer(t, { PAIR_RELAX_MS: '400' });
+  const two = await client(port, 'dev-pair-two'), one = await client(port, 'dev-pair-one');
+  assert.equal(two.ready.me.pair, false);
+  two.send({ t: 'profile', pair: true });
+  assert.equal((await two.next('me')).me.pair, true);
+  two.send({ t: 'find' }); await two.next('waiting');
+  one.send({ t: 'find' }); await one.next('waiting');
+  await sleep(150);
+  assert.equal(one.ws.readyState, 1);
+  // Мягкое ограничение снимается по таймеру матчмейкера
+  const m = await until(one, 'matched', () => true);
+  assert.equal(m.peer.pair, true, 'одиночка знает, что перед телефоном двое');
+  assert.equal((await two.next('matched')).peer.pair, false);
+  // Настройка переживает переподключение
+  two.ws.close();
+  const again = await client(port, 'dev-pair-two');
+  assert.equal(again.ready.me.pair, true);
+  for (const x of [one, again]) x.ws.close();
+});
+
+test('Duo: отвал соединения в группе — обе Duo снова ищут, но не друг с другом сразу', async t => {
+  const port = await startServer(t, { DUO_CONN_TIMEOUT_MS: '60000' });
+  const [a1, a2, b1, b2] = await Promise.all(['dev-dc-a1', 'dev-dc-a2', 'dev-dc-b1', 'dev-dc-b2'].map(id => client(port, id)));
+  a1.send({ t: 'duo_create' });
+  const code = (await a1.next('duo')).duo.code;
+  a2.send({ t: 'duo_join', code });
+  await a2.next('duo');
+  b1.send({ t: 'duo_create' });
+  const code2 = (await b1.next('duo')).duo.code;
+  b2.send({ t: 'duo_join', code: code2 });
+  await b2.next('duo');
+  a1.send({ t: 'duo_search' }); await a1.next('duo_waiting');
+  b1.send({ t: 'duo_search' });
+  const ms = await Promise.all([a1, a2, b1, b2].map(c => c.next('duo_matched')));
+  // b2 не смог соединиться с a1
+  b2.send({ t: 'duo_conn', to: ms[0].you, ok: false, why: 'timeout' });
+  for (const c of [a1, a2, b1, b2]) assert.equal((await c.next('duo_ended')).reason, 'conn');
+  await a1.next('duo_waiting');
+  await b1.next('duo_waiting');
+  await assert.rejects(a1.next('duo_matched'), /timeout/, 'те же две Duo сразу не сводятся');
+  for (const c of [a1, a2, b1, b2]) c.ws.close();
+});

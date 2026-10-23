@@ -151,7 +151,7 @@
     el.searching.classList.toggle('connecting', mode === 'connecting');
     el.resume.hidden = mode !== 'idle';
     if (mode === 'waiting') {
-      el.searchTitle.textContent = t(me.want === 'f' ? 'search_f' : me.want === 'm' ? 'search_m' : 'search_any');
+      el.searchTitle.textContent = t(me.pair ? 'search_pair' : me.want === 'f' ? 'search_f' : me.want === 'm' ? 'search_m' : 'search_any');
       el.searchSub.textContent = t('search_sub', { n: fmtOnline(online) });
     } else if (mode === 'connecting') {
       el.searchTitle.textContent = t('connecting');
@@ -333,7 +333,7 @@
         if (peer?.guess) startGuess(peer.guess);
         if (peer?.exchange) startExchange(peer.exchange);
         haptic('medium');
-        const who = peer?.gender === 'f' ? t('peer_f') : peer?.gender === 'm' ? t('peer_m') : '';
+        const who = peer?.pair ? `👫 ${t('peer_pair')}` : peer?.gender === 'f' ? t('peer_f') : peer?.gender === 'm' ? t('peer_m') : '';
         const lang = (peer?.langs || []).map(l => LANG_META[l]?.[0]).filter(Boolean).join(' ');
         const where = peer?.country ? `${flagOf(peer.country)} ${countryName(peer.country)}` : '';
         const direct = peer?.direct === 'friend' ? `👥 ${peer.name || ''}` : peer?.direct === 'live' ? `🔴 ${peer.name || 'LIVE'}` : '';
@@ -660,6 +660,8 @@
     $('salute-n').textContent = me.salutes || 0;
     renderComplBoard();
     for (const b of $('mode-seg').children) b.classList.toggle('on', b.dataset.v === (me.reveal ? 'voice' : 'video'));
+    for (const b of $('pair-seg').children) b.classList.toggle('on', b.dataset.v === (me.pair ? '1' : '0'));
+    $('pair-chip').hidden = !me.pair;
     for (const b of $('notify-seg').children) b.classList.toggle('on', b.dataset.v === (me.notifyEvents ? '1' : '0'));
     if (me.langs?.length) { myLangs = me.langs; renderLangs(); }
     renderExchange();
@@ -1523,6 +1525,18 @@
     el.searchTitle.textContent = t('duo_searching');
   }
   $('duo-open').onclick = () => { renderDuo(); openSheet('sheet-duo'); };
+  $('pair-chip').onclick = () => { renderDuo(); openSheet('sheet-duo'); };
+  // «Вдвоём с одного телефона»: подбираем таких же двоих, собеседник узнаёт, что вас двое
+  $('pair-seg').onclick = e => {
+    const v = e.target.closest('button')?.dataset.v;
+    if (!v) return;
+    const on = v === '1';
+    if (on === Boolean(me.pair)) return;
+    send({ t: 'profile', pair: on });
+    toast(t(on ? 'pair_on' : 'pair_off'), 3000);
+    haptic(on ? 'success' : 'light');
+    if (state === 'waiting') send({ t: 'find' });
+  };
   $('duo-create').onclick = () => { closePeer(); send({ t: 'duo_create' }); haptic('medium'); };
   $('duo-join').onsubmit = e => {
     e.preventDefault();
@@ -1573,7 +1587,8 @@
       case 'duo_ended':
         duo.stop();
         clearInterval(frameTimer);
-        if (msg.reason === 'next' || msg.reason === 'partner_left' && duoInfo?.size === 2) { duoWaiting(); toast(t('duo_ended'), 2200); }
+        if (msg.reason === 'conn') { duoWaiting(); toast(t('duo_conn_fail'), 3200); haptic('warning'); }
+        else if (msg.reason === 'next' || msg.reason === 'partner_left' && duoInfo?.size === 2) { duoWaiting(); toast(t('duo_ended'), 2200); }
         else if (msg.reason === 'moderation') { duoWaiting(); toast(t('moderated_peer')); }
         else { state = 'idle'; setOverlay('idle'); }
         break;
