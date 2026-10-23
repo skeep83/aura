@@ -11,7 +11,7 @@
 [![Mini App](https://img.shields.io/badge/Mini%20App-aura--life.online-4A86F7)](https://aura-life.online)
 ![Node](https://img.shields.io/badge/Node.js-22-339933?logo=nodedotjs&logoColor=white)
 ![WebRTC](https://img.shields.io/badge/WebRTC-P2P-333?logo=webrtc)
-![Tests](https://img.shields.io/badge/tests-29%20passing-2EA44F)
+![Tests](https://img.shields.io/badge/tests-51%20passing-2EA44F)
 ![i18n](https://img.shields.io/badge/i18n-bot%2017%20%C2%B7%20app%208-8A2BE2)
 
 </div>
@@ -33,6 +33,7 @@ Aura — Telegram Mini App для видеознакомств со случай
 | 💫 **Реакции и салюты** | ❤️ 😂 🔥 👏 летят поверх видео; 🎆 салют за Stars — получателю +aura и Premium за каждые 10 |
 | 📸 **Aura Moment** | Общее фото по согласию обоих: отсчёт 3-2-1, карточка-полароид для Stories |
 | 🔮 **Aura Wrapped** | Итоги недели и «тип ауры» — каждое воскресенье в боте, карточка для Stories |
+| 🧵 **Нити** | История, вопрос миру или пожелание идут от разговора к разговору по всему миру: ход — и передал дальше. Финал с маршрутом по карте, уведомления о пути своей нити, карточка для Stories |
 | 👫 **Duo 2×2** | Двое друзей вместе знакомятся с другой парой: сетка из четырёх видео |
 | 🎧 **Сначала голос** | Лицо проявляется по ходу разговора, аура «дышит» в такт голосу |
 | 🎲 **Игры в звонке** | Тема для разговора, камень-ножницы-бумага, «Не смейся» (детектор улыбки на устройстве) |
@@ -61,7 +62,7 @@ flowchart LR
 ```bash
 npm install
 npm run dev      # http://localhost:8080 — без Telegram, Premium выдаётся бесплатно
-npm test         # 29 тестов: подпись, матчинг, языки, комнаты, аура, вайб, паспорт, возраст, платежи
+npm test         # 51 тест: подпись, матчинг, языки, комнаты, аура, вайб, паспорт, возраст, платежи, нити
 ```
 
 Откройте две вкладки — каждая получает свою тестовую личность, и они соединятся друг с другом. Язык интерфейса: `?lang=en|ru|uk|es|pt|de|tr|id`, комната/реферал: `?startapp=room_test`.
@@ -78,9 +79,9 @@ npm test         # 29 тестов: подпись, матчинг, языки, 
 ## Структура
 
 ```
-src/            бэкенд: server.js (HTTP+WS), matchmaker, duo (2×2), db (SQLite), bot, bot-profile (17 языков),
+src/            бэкенд: server.js (HTTP+WS), matchmaker, duo (2×2), threads (нити), db (SQLite), bot, bot-profile (17 языков),
                 moderation-клиент, events (Aura Hour), langs, stories, auth (подпись initData)
-public/         Mini App: index.html, app.js, i18n.js (8 языков), games.js, mask.js, face.js, duo.js, style.css
+public/         Mini App: index.html, app.js, i18n.js (8 языков), games.js, threads.js + worldmap.js (нити, карта), mask.js, face.js, duo.js, style.css
 moderation/     FastAPI-сервис: NSFW (Falconsai) + возраст (ViT по лицу), Docker CPU/GPU
 deploy/         nginx.conf, Caddyfile, install.sh (VPS), truenas/ (деплой, сторож, ввод токенов)
 branding/       логотип, аватар, обложки, тексты для @BotFather

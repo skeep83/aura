@@ -35,6 +35,7 @@ const USER_COLUMNS = {
   crowd_notified_at: 'INTEGER NOT NULL DEFAULT 0',
   ex_native: "TEXT NOT NULL DEFAULT ''",          // языковой обмен: мой язык
   ex_learn: "TEXT NOT NULL DEFAULT ''",           // языковой обмен: учу
+  threads_seen: 'INTEGER NOT NULL DEFAULT 0',     // сколько раз человек видел карточку нити (подсказки — первые три раза)
 };
 
 // Пользователи, жалобы, платежи, комнаты, оценки. SQLite в одном файле — хватает на один процесс.
@@ -499,6 +500,11 @@ export class Db {
   markCrowdNotified(id, now = Date.now()) { this.db.prepare('UPDATE users SET crowd_notified_at = ? WHERE id = ?').run(now, id); }
 
   langOf(id) { return this.db.prepare('SELECT lang FROM users WHERE id = ?').get(id)?.lang || ''; }
+  bumpThreadsSeen(id) {
+    this.user(id);
+    this.db.prepare('UPDATE users SET threads_seen = MIN(threads_seen + 1, 99) WHERE id = ?').run(id);
+    return this.db.prepare('SELECT threads_seen AS n FROM users WHERE id = ?').get(id).n;
+  }
 
   stats(now = Date.now()) {
     const one = sql => this.db.prepare(sql).get(now).n;

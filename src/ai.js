@@ -18,10 +18,11 @@ export const FEATURES = {
   translate: 'Перевод сообщений в чате по нажатию',
   wrapped: 'Личный текст в недельных итогах Aura Wrapped',
   adminAnalyst: 'ИИ-аналитик и разбор пользователей в админ-панели',
+  threads: 'Нити: перевод ходов на язык читателя и заголовок истории в финале',
 };
 
 const DEFAULTS = { enabled: false, preset: 'openai', kind: 'openai', baseUrl: PRESETS.openai.baseUrl, model: PRESETS.openai.model, apiKey: '',
-  features: { chatModeration: true, icebreakers: true, translate: true, wrapped: true, adminAnalyst: true }, dailyLimit: 5000 };
+  features: { chatModeration: true, icebreakers: true, translate: true, wrapped: true, adminAnalyst: true, threads: true }, dailyLimit: 5000 };
 
 const LANG_NAMES = { ru: 'Russian', en: 'English', uk: 'Ukrainian', es: 'Spanish', pt: 'Portuguese', de: 'German', fr: 'French', it: 'Italian', tr: 'Turkish',
   pl: 'Polish', ar: 'Arabic', hi: 'Hindi', id: 'Indonesian', fa: 'Persian', vi: 'Vietnamese', uz: 'Uzbek', kk: 'Kazakh', be: 'Belarusian', zh: 'Chinese' };
@@ -154,6 +155,31 @@ export function createAI({ db }) {
     }));
   }
 
+  // ---------- Нити: пакетный перевод ходов и заголовок истории ----------
+  // texts → массив переводов той же длины (или null). coherent — переводить как связный текст (история)
+  async function translateBatch(texts, lang, { coherent = false } = {}) {
+    if (!on('threads') || !texts.length) return null;
+    const out = await complete({
+      feature: 'threads', maxTokens: 60 * texts.length + 100, temperature: 0, json: true, timeoutMs: 12_000,
+      system: `Translate every string of the JSON array "t" into ${langName(lang)}. ` +
+        (coherent ? 'The strings are consecutive sentences of one story written by different people: keep names, gender and tense consistent across them. ' : '') +
+        'Keep order and count, keep emoji, tone and slang. A string already in the target language stays unchanged. ' +
+        'Reply only with JSON: {"t": ["...", ...]}',
+      messages: [{ role: 'user', content: JSON.stringify({ t: texts.map(s => String(s).slice(0, 200)) }) }],
+    });
+    const arr = parseJson(out)?.t;
+    return Array.isArray(arr) && arr.length === texts.length ? arr.map(String) : null;
+  }
+  async function threadTitle(text, lang) {
+    if (!on('threads') || !text) return null;
+    const out = await complete({
+      feature: 'threads', maxTokens: 30, temperature: 0.8,
+      system: `Give a short, playful title (3–5 words, in ${langName(lang)}) for a tiny story written one sentence at a time by strangers around the world. No quotes, no emoji, no trailing period. Output only the title.`,
+      messages: [{ role: 'user', content: text.slice(0, 1500) }],
+    });
+    return out.replace(/^["«]|["».]$/g, '').slice(0, 60) || null;
+  }
+
   // ---------- Личный текст в итогах недели ----------
   async function wrappedLine(w, lang) {
     if (!on('wrapped') || !w.chats) return null;
@@ -194,7 +220,7 @@ export function createAI({ db }) {
 
   return {
     get config() { return cfg; }, publicConfig, save, on, complete, test,
-    moderateChat, icebreaker, translate, wrappedLine, analyst, reviewUser,
+    moderateChat, icebreaker, translate, translateBatch, threadTitle, wrappedLine, analyst, reviewUser,
     clientFeatures: () => ({ icebreakers: on('icebreakers'), translate: on('translate') }),
   };
 }

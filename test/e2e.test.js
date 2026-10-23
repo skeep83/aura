@@ -597,3 +597,76 @@ test('Компьютер: одноразовый код из Mini App → вхо
   assert.notEqual(forged.ready.me.shareLink, app.ready.me.shareLink);
   for (const c of [app, again, reuse, forged]) c.ws.close();
 });
+
+test('Нити: старт в звонке показывается собеседнику, передача меняет держателя, карман приходит в ready', async t => {
+  const port = await startServer(t, { THREAD_HOPS_WISH: '3' });
+  const a = await client(port, 'dev-th-a', { devCountry: 'MD', lang: 'ru' }), b = await client(port, 'dev-th-b', { devCountry: 'AR', lang: 'es' });
+  assert.equal(a.ready.thread, null);
+  assert.deepEqual(Object.keys(a.ready.threadKinds), ['story', 'question', 'wish']);
+  assert.equal(a.ready.threadKinds.wish.maxHops, 3);
+  a.send({ t: 'find' }); await a.next('waiting');
+  b.send({ t: 'find' }); await a.next('matched'); await b.next('matched');
+
+  // Автор начинает нить прямо в разговоре — собеседник сразу видит карточку и может продолжить
+  a.send({ t: 'thread_start', kind: 'wish', text: 'Пусть у тебя всё получится' });
+  const pocket = await a.next('thread_pocket');
+  assert.equal(pocket.card.holder, true);
+  assert.equal(pocket.card.from, 'MD');
+  const shownA = await a.next('thread_card');
+  assert.equal(shownA.role, 'holder');
+  const shownB = await b.next('thread_card');
+  assert.equal(shownB.role, 'peer');
+  assert.equal(shownB.canTake, true);
+  assert.equal(shownB.card.moves[0].text, 'Пусть у тебя всё получится', 'без ИИ — оригинал');
+
+  // Ссылки в ходе скрываются правилами чата, как в сообщениях
+  b.send({ t: 'thread_take', text: 'Y a ti también, mira t.me/spam' });
+  const received = await b.next('thread_received');
+  assert.equal(received.card.holder, true);
+  assert.equal(received.card.hops, 2);
+  assert.deepEqual(received.card.countries, ['MD', 'AR']);
+  assert.ok(!received.card.moves[1].text.includes('t.me'));
+  const passed = await a.next('thread_passed');
+  assert.equal(passed.card.holder, false);
+  assert.equal(passed.card.myHop, 1);
+
+  // Повторная передача тому же человеку невозможна; «Далее» сбрасывает показ
+  b.send({ t: 'thread_show' });
+  const again = await a.next('thread_card');
+  assert.equal(again.canTake, false);
+  assert.equal(again.reason, 'already');
+
+  // Карман переживает переподключение
+  b.ws.close();
+  const b2 = await client(port, 'dev-th-b', { devCountry: 'AR', lang: 'es' });
+  assert.equal(b2.ready.thread.holder, true);
+  assert.equal(b2.ready.thread.hops, 2);
+
+  // Третий закрывает нить: финал приходит обоим вживую, автору +aura. Автор выходит из очереди, чтобы не перехватить пару
+  await a.next('peer_left'); // b переподключился — разговор с ним уже закончился
+  a.send({ t: 'stop' });
+  await a.next('stopped');
+  const c = await client(port, 'dev-th-c', { devCountry: 'ES', lang: 'en' });
+  b2.send({ t: 'find' }); c.send({ t: 'find' });
+  await until(b2, 'matched', () => true); await c.next('matched');
+  b2.send({ t: 'thread_show' });
+  await c.next('thread_card');
+  c.send({ t: 'thread_take', text: 'Good luck to all of us' });
+  const finC = await c.next('thread_final');
+  assert.equal(finC.closer, true);
+  assert.equal(finC.card.status, 'done');
+  assert.equal(finC.card.myHop, 3);
+  const finB = await b2.next('thread_final');
+  assert.equal(finB.closer, false);
+  // Автор не в паре — ему всплывающее «нить дошла до конца»
+  const news = await a.next('thread_news');
+  assert.equal(news.kind, 'done');
+  assert.equal(news.hops, 3);
+  // Страница по коду доступна любому
+  c.send({ t: 'thread_page', code: finC.card.code });
+  const page = await c.next('thread_page');
+  assert.equal(page.card.countries.length, 3);
+  const me = await until(a, 'me', m => m.me.aura >= 102);
+  assert.equal(me.me.aura, 102, '+1 за каждый чужой ход');
+  for (const x of [a, b2, c]) x.ws.close();
+});

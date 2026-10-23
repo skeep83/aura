@@ -21,7 +21,7 @@
       document.documentElement.dataset.theme = dark ? 'dark' : 'light';
     })();
   </script>
-  <link rel="stylesheet" href="style.css?v=20261011">
+  <link rel="stylesheet" href="style.css?v=20261023">
 </head>
 <body>
   <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -141,6 +141,7 @@
 
       <!-- Поиск / соединение / пауза: поверх своей размытой камеры -->
       <div class="searching" id="searching">
+        <canvas class="thread-map" id="thread-map" hidden aria-hidden="true"></canvas>
         <div class="dial">
           <svg class="dial-arc" viewBox="0 0 200 200" aria-hidden="true">
             <circle cx="100" cy="100" r="88" class="track"/>
@@ -154,6 +155,15 @@
         <button class="btn-pill lg duo-pill" id="duo-open"><i>👫</i><span data-i="duo">Duo 2×2</span></button>
         <button class="btn-pill lg crowd-pill" id="crowd-btn" hidden><i>🔔</i><span id="crowd-text"></span></button>
         <button class="btn-pill lg" id="live-leave" hidden data-i="live_leave">Выйти из очереди</button>
+        <!-- Нить из пула прилетела в карман -->
+        <div class="thread-offer lg" id="thread-offer" hidden>
+          <span class="th-kind" id="th-offer-kind"></span>
+          <b id="th-offer-title"></b>
+          <small id="th-offer-sub"></small>
+          <div id="th-offer-svg"></div>
+          <p class="th-hint" id="th-offer-hint" hidden></p>
+          <div class="th-btns"><button id="th-offer-no" data-i="not_now">Не сейчас</button><button class="go" id="th-offer-yes" data-i="th_take">Взять</button></div>
+        </div>
         <div class="rate lg" id="rate" hidden>
           <span data-i="rate_q">Как прошлый собеседник?</span>
           <div class="rate-btns">
@@ -179,6 +189,9 @@
         <div class="guess-opts" id="guess-opts"></div>
         <small id="guess-sub"></small>
       </div>
+
+      <!-- Нить: карточка поверх видео, у обоих синхронно -->
+      <div class="thread-card lg" id="thread-card" hidden></div>
 
       <!-- Aura Moment: запрос согласия, обратный отсчёт и вспышка -->
       <div class="moment-ask lg" id="moment-ask" hidden>
@@ -235,12 +248,15 @@
     <div class="rail" id="rail">
       <button class="rail-btn lg vibe" id="vibe-btn" aria-label="Вайб"><svg><use href="#i-spark"/></svg><span data-i="vibe">Вайб</span></button>
       <button class="rail-btn lg" id="games-btn" aria-label="Игры"><i>🎲</i><span data-i="games">Игры</span></button>
+      <button class="rail-btn lg thread" id="thread-btn" aria-label="Нить"><i>🧵</i><span data-i="thread">Нить</span><b class="th-badge" id="th-badge" hidden></b></button>
       <button class="rail-btn lg" id="mask-btn" aria-label="Маска"><i>🎭</i><span data-i="mask">Маска</span></button>
       <button class="rail-btn lg" id="react-btn" aria-label="Реакции"><i>💫</i><span data-i="reactions">Реакции</span></button>
       <button class="rail-btn lg" id="moment-btn" aria-label="Момент"><i>📸</i><span data-i="moment">Момент</span></button>
     </div>
 
     <div class="game-layer" id="game-layer" hidden></div>
+    <!-- Нить: финал и страница нити — маршрут по карте, ходы, сборка, штамп -->
+    <div class="thread-final" id="thread-final" hidden></div>
 
     <footer class="bottom" id="bottom">
       <div class="react-bar lg" id="react-bar" hidden>
@@ -409,6 +425,24 @@
     <button class="btn-grad" id="salute-buy"><span data-i="pay">Оплатить звёздами</span></button>
   </section>
 
+  <section class="lg sheet" id="sheet-thread" hidden>
+    <div class="grip"></div>
+    <h2 data-i="th_start_title">Начать нить</h2>
+    <p class="sheet-sub" data-i="th_start_sub">Она пойдёт от разговора к разговору по всему миру. Вы увидите, куда она дошла.</p>
+    <div class="th-kinds" id="th-kinds">
+      <button data-k="story"><i>📖</i><b data-i="th_story">История</b></button>
+      <button data-k="question"><i>❓</i><b data-i="th_question">Вопрос миру</b></button>
+      <button data-k="wish"><i>💌</i><b data-i="th_wish">Пожелание</b></button>
+    </div>
+    <p class="hint" id="th-start-hint"></p>
+    <div class="th-compose">
+      <input id="th-text" maxlength="120" autocomplete="off" enterkeyhint="done">
+      <small class="th-count" id="th-count">0 / 120</small>
+    </div>
+    <button class="btn-grad" id="th-start"><span data-i="th_start_btn">Запустить нить</span></button>
+    <p class="fine" id="th-start-sub"></p>
+  </section>
+
   <section class="lg sheet center" id="sheet-moment" hidden>
     <div class="grip"></div>
     <h2 data-i="moment_title">Aura Moment</h2>
@@ -548,12 +582,14 @@
 
   <div class="toasts" id="toasts"></div>
 
-  <script src="vendor/qrcode.js?v=20261011"></script>
-  <script src="i18n.js?v=20261011"></script>
-  <script src="face.js?v=20261011"></script>
-  <script src="mask.js?v=20261011"></script>
-  <script src="games.js?v=20261011"></script>
-  <script src="duo.js?v=20261011"></script>
-  <script src="app.js?v=20261011"></script>
+  <script src="vendor/qrcode.js?v=20261023"></script>
+  <script src="i18n.js?v=20261023"></script>
+  <script src="face.js?v=20261023"></script>
+  <script src="mask.js?v=20261023"></script>
+  <script src="games.js?v=20261023"></script>
+  <script src="worldmap.js?v=20261023"></script>
+  <script src="threads.js?v=20261023"></script>
+  <script src="duo.js?v=20261023"></script>
+  <script src="app.js?v=20261023"></script>
 </body>
 </html>

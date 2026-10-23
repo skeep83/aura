@@ -19,6 +19,7 @@ import { createAdmin } from './admin.js';
 import { ChatFilter } from './chatfilter.js';
 import { createAI } from './ai.js';
 import { createJev } from './jev.js';
+import { createThreads, KINDS as THREAD_KINDS } from './threads.js';
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const PUBLIC_DIR = path.join(ROOT, 'public');
@@ -99,6 +100,9 @@ const moderation = new Moderation({
 const chatFilter = new ChatFilter();
 const ai = createAI({ db });
 const jev = createJev({ db });
+// Нити: длина по типам и сроки — из .env (THREAD_HOPS_STORY/QUESTION/WISH, THREAD_TTL_DAYS, THREAD_STUCK_HOURS), без деплоя клиента
+const threadKinds = Object.fromEntries(Object.entries(THREAD_KINDS).map(([k, v]) => [k, { ...v, maxHops: Math.max(3, Number(env[`THREAD_HOPS_${k.toUpperCase()}`] || v.maxHops)) }]));
+const threads = createThreads({ db, ai, kinds: threadKinds, ttlMs: Number(env.THREAD_TTL_DAYS || 7) * DAY, stuckMs: Number(env.THREAD_STUCK_HOURS || 48) * HOUR });
 const FRAME_GRACE_MS = Number(env.FRAME_GRACE_MS || 25_000);  // после начала разговора кадры обязательны
 const FRAME_MAX_GAP_MS = Number(env.FRAME_MAX_GAP_MS || 20_000); // дольше без кадра — разговор прерывается (модифицированный клиент или камера выключена)
 const schedule = new EventSchedule({
@@ -108,6 +112,14 @@ const schedule = new EventSchedule({
 const clients = new Map(); // userId -> client (одно активное окно на пользователя)
 
 const today = (now = Date.now()) => localDay(now, cfg.tzOffset);
+// Язык интерфейса Mini App (8 языков; kk/uz/be → ru) — на нём приходят карточки нитей
+const UI_LANGS = ['en', 'ru', 'uk', 'es', 'pt', 'de', 'tr', 'id'];
+function uiLang(l) {
+  const x = String(l || '').slice(0, 2).toLowerCase();
+  return UI_LANGS.includes(x) ? x : ['kk', 'uz', 'be'].includes(x) ? 'ru' : 'en';
+}
+const flagEmoji = code => /^[A-Z]{2}$/.test(code || '') ? String.fromCodePoint(...[...code].map(c => 0x1F1E6 + c.charCodeAt(0) - 65)) : '🌍';
+const countryNameIn = (code, lang) => { try { return code ? new Intl.DisplayNames([lang || 'en'], { type: 'region' }).of(code) : ''; } catch { return code || ''; } };
 const yesterday = (now = Date.now()) => localDay(now - DAY, cfg.tzOffset);
 
 // Ссылка, открывающая Mini App с параметром (комната, реферал)
@@ -216,6 +228,7 @@ const mm = new Matchmaker({
   },
   onUnpair(a, b, durationMs) {
     a.vibe = b.vibe = null;
+    a.threadShown = b.threadShown = null;
     if (a.direct || b.direct) {
       const kind = a.direct || b.direct;
       for (const c of [a, b]) { c.direct = null; c.directEnded = true; }
@@ -242,7 +255,7 @@ let bot_ = null;
 const bot = cfg.botToken ? (bot_ = createBot({
   token: cfg.botToken, site: { get url() { return cfg.publicUrl; } }, stateFile: path.join(DATA_DIR, 'bot-profile.hash'), appName: cfg.appName, adminIds: cfg.adminIds,
   supportContact: cfg.supportContact, plans, db, appLink, schedule,
-  stats: () => ({ online: clients.size, ...mm.stats(), ...duos.stats(), ...live.stats(), ...db.stats(), ...db.funnel() }),
+  stats: () => ({ online: clients.size, ...mm.stats(), ...duos.stats(), ...live.stats(), ...threads.stats(), ...db.stats(), ...db.funnel() }),
   kick: id => kick(id),
   onSalutes: id => {
     const c = clients.get(id);
@@ -376,6 +389,7 @@ function sourceOf(sp, room) {
   if (sp.startsWith('room_')) return `room:${room || '?'}`;
   if (sp.startsWith('ref_')) return 'ref';
   if (sp.startsWith('duo_')) return 'duo';
+  if (sp.startsWith('thread_')) return 'thread';
   if (sp.startsWith('_tgr_')) return 'affiliate';
   return 'direct';
 }
@@ -497,6 +511,45 @@ function friendsList(c) {
     return { code: db.refCode(f.id), name: f.name || '', country: f.country || null, online: Boolean(o),
       busy: Boolean(o && (mm.peerOf(o) || o.call || o.live)), lastSeen: f.lastSeen };
   });
+}
+
+// ---------- Нити: вехи автору и финал всем участникам ----------
+const threadButton = (th, lang) => ({ reply_markup: { inline_keyboard: [[{ text: note(lang, 'thread_btn'), url: appLink(`thread_${th.code}`) }]] } });
+function refreshAura(id) {
+  const c = clients.get(id);
+  if (c) c.send({ t: 'me', me: profileOf(c) });
+}
+// Нить дошла до конца: двое закрывших видят финал вживую, остальным — сообщение бота (онлайн — всплывающее в приложении)
+function notifyThreadDone(th, except = []) {
+  const ms = threads.participants(th.id);
+  const countries = threads.route(ms).length;
+  const days = Math.max(1, Math.ceil(((th.finished_at || Date.now()) - th.started_at) / DAY));
+  (async () => {
+    for (const p of ms) {
+      if (except.includes(p.id)) continue;
+      const c = clients.get(p.id);
+      if (c) { c.send({ t: 'thread_news', kind: 'done', code: th.code, n: p.n, hops: th.hops, countries }); continue; }
+      if (!bot) continue;
+      const lang = db.langOf(p.id);
+      await bot.notify(p.id, note(lang, 'thread_done', { n: p.n, hops: th.hops, countries, days }), threadButton(th, lang));
+      await new Promise(r => setTimeout(r, 40));
+    }
+  })().catch(e => console.error('thread notify:', e.message));
+}
+// Автору — на 5, 10, 20 ходах и на каждой пятой новой стране
+const THREAD_MILESTONES = [5, 10, 20];
+function threadMilestone(th, except = []) {
+  const ms = threads.participants(th.id);
+  const last = ms.at(-1);
+  const countries = threads.route(ms);
+  const newCountry = last?.country && ms.filter(m => m.country === last.country).length === 1;
+  if (!THREAD_MILESTONES.includes(th.hops) && !(newCountry && countries.length % 5 === 0)) return;
+  const id = th.starter_id;
+  if (except.includes(id)) return;
+  const c = clients.get(id);
+  if (c) return c.send({ t: 'thread_news', kind: 'milestone', code: th.code, hops: th.hops, countries: countries.length, country: last?.country || '' });
+  const lang = db.langOf(id);
+  bot?.notify(id, note(lang, 'thread_milestone', { flag: flagEmoji(last?.country), country: countryNameIn(last?.country, lang) || '…', hops: th.hops, countries: countries.length }), threadButton(th, lang));
 }
 
 // ---------- HTTP ----------
@@ -715,6 +768,7 @@ wss.on('connection', (ws, req) => {
     if (!client.premium && !db.filterLeft(client.id, today(), cfg.freeFilterPerDay)) client.want = 'any';
     setStanding(client, u);
     applyLangs(client);
+    client.lang = uiLang(msg.lang || user.lang || u.lang);
     // Часовой пояс устройства (минуты к UTC) — для Aura Hour по местному времени
     const tz = Number(msg.tz);
     if (Number.isInteger(tz) && tz >= -720 && tz <= 840) { client.tz = tz; if (tz !== u.tz_min) db.setTz(user.id, tz); }
@@ -733,6 +787,8 @@ wss.on('connection', (ws, req) => {
     if (isNew) db.setSource(client.id, source);
     db.event('session', client.id, 0, source === 'direct' ? '' : source);
     const ice = await iceServers(user.id);
+    const pocket = threads.holding(client.id);
+    const threadCard = pocket ? await threads.view(pocket, client.lang, client.id) : null;
     if (clients.get(user.id) !== client) return;
     send({
       t: 'ready', appName: cfg.appName, ice, me: profileOf(client), online: onlineFor(client),
@@ -744,6 +800,8 @@ wss.on('connection', (ws, req) => {
       openWrapped: sp === 'wrapped', ai: ai.clientFeatures(),
       liveInvite: sp.startsWith('live_') ? liveInviteInfo(sp.slice(5)) : null,
       callInvite: sp.startsWith('call_') ? { code: sp.slice(5) } : null,
+      thread: threadCard, threadsSeen: u.threads_seen || 0, threadKinds: Object.fromEntries(Object.entries(threadKinds).map(([k, v]) => [k, v])),
+      openThread: /^thread_[\w-]{1,20}$/.test(sp) ? sp.slice(7) : null,
     });
     if (session) { send({ t: 'session', token: session }); db.event('web_login', user.id); }
     if (client.callFrom) {
@@ -949,6 +1007,134 @@ wss.on('connection', (ws, req) => {
     }
   }
 
+  // ---------- Нити ----------
+  const threadCardFor = (th, c = client) => threads.view(th, c.lang || 'en', c.id);
+  // Пустой карман в ожидании: вручаем застрявшую нить из пула (не чаще раза в минуту)
+  async function offerThread() {
+    const c = client, now = Date.now();
+    if (threads.holding(c.id) || now - (c.threadOfferAt || 0) < 60_000) return;
+    const th = threads.offerFor(c.id);
+    if (!th) return;
+    c.threadOfferAt = now;
+    c.threadOffer = th.id;
+    const card = await threadCardFor(th);
+    if (clients.get(c.id) === c && mm.isWaiting(c)) send({ t: 'thread_offer', card });
+  }
+  // Текст хода: правила чата (ссылки и контакты скрываются, тяжёлое — страйк), второй слой (Jev/ИИ) — по уже записанному ходу
+  function threadText(text) {
+    const t = String(text || '').replace(/\s+/g, ' ').trim().slice(0, 200);
+    if (!t) return { error: 'text' };
+    const r = chatFilter.check(t, { from: client.id, to: 'thread', now: Date.now() });
+    if (r.action === 'block') { onChatViolation(r.reason, t); return { error: 'blocked' }; }
+    return { text: r.text };
+  }
+  function threadSecondLayer(th, n, text) {
+    const second = jev.on('chatModeration') ? ['jev', jev.moderateChat(text)] : ['ai', ai.moderateChat(text, client.id)];
+    second[1].then(v => {
+      if (!v) return;
+      threads.hideMove(th.id, n);
+      db.event('thread_hide', client.id, n, `${second[0]}:${v}`);
+      if (clients.get(client.id) === client) onChatViolation(`${second[0]}:${v}`, text);
+    }).catch(() => {});
+  }
+  async function showThread(th) {
+    const peer = mm.peerOf(client);
+    if (!peer) return send({ t: 'thread_error', code: 'only_call' });
+    client.threadShown = { id: th.id, to: peer.id, at: Date.now() };
+    const [mine, theirs] = await Promise.all([threadCardFor(th), threadCardFor(th, peer)]);
+    if (mm.peerOf(client) !== peer || client.threadShown?.id !== th.id) return;
+    send({ t: 'thread_card', card: mine, role: 'holder' });
+    const reason = threads.holding(peer.id) ? 'holding' : threads.participated(th.id, peer.id) ? 'already' : null;
+    peer.send({ t: 'thread_card', card: theirs, role: 'peer', canTake: !reason, reason });
+    db.event('thread_show', client.id, th.hops, th.kind);
+  }
+  async function onThread(msg) {
+    const now = Date.now();
+    switch (msg.t) {
+      case 'thread_seen':
+        db.bumpThreadsSeen(client.id);
+        break;
+      case 'thread_start': {
+        if (now - (client.lastThread || 0) < 1500) return;
+        client.lastThread = now;
+        const tx = threadText(msg.text);
+        if (tx.error) return tx.error === 'blocked' ? undefined : send({ t: 'thread_error', code: tx.error });
+        const r = threads.start(client.id, { kind: msg.kind, text: tx.text, lang: client.lang, country: client.country, premium: client.premium }, now);
+        if (r.error) return send({ t: 'thread_error', code: r.error });
+        db.event('thread_start', client.id, 0, r.thread.kind);
+        threadSecondLayer(r.thread, 1, tx.text);
+        send({ t: 'thread_pocket', card: await threadCardFor(r.thread), started: true });
+        if (mm.peerOf(client)) await showThread(r.thread);
+        break;
+      }
+      case 'thread_show': {
+        if (now - (client.lastThread || 0) < 1500) return;
+        client.lastThread = now;
+        const th = threads.holding(client.id);
+        if (!th) return send({ t: 'thread_error', code: 'empty' });
+        await showThread(th);
+        break;
+      }
+      case 'thread_take': {
+        const peer = mm.peerOf(client);
+        if (!peer || peer.threadShown?.to !== client.id) return send({ t: 'thread_error', code: 'gone' });
+        const th = threads.byId(peer.threadShown.id);
+        if (!th) return send({ t: 'thread_error', code: 'gone' });
+        const tx = threadText(msg.text);
+        if (tx.error) return tx.error === 'blocked' ? undefined : send({ t: 'thread_error', code: tx.error });
+        const r = threads.take(th.id, peer.id, client.id, { text: tx.text, lang: client.lang, country: client.country }, now);
+        if (r.error) return send({ t: 'thread_error', code: r.error });
+        peer.threadShown = null;
+        db.event('thread_move', client.id, r.move.n, r.thread.kind);
+        threadSecondLayer(r.thread, r.move.n, tx.text);
+        // Автору +1 aura за каждый ход, закрывшему нить — +5
+        if (r.thread.starter_id !== client.id) { db.addAuraBonus(r.thread.starter_id, 1); refreshAura(r.thread.starter_id); }
+        if (r.finished) { db.addAuraBonus(client.id, 5); db.event('thread_done', client.id, r.thread.hops, r.thread.kind); }
+        const [mine, theirs] = await Promise.all([threadCardFor(r.thread), threadCardFor(r.thread, peer)]);
+        if (r.finished) {
+          // Финал вживую у пары, которая закрыла нить; остальным — бот
+          send({ t: 'thread_final', card: mine, closer: true });
+          peer.send({ t: 'thread_final', card: theirs, closer: false });
+          refreshAura(client.id);
+          notifyThreadDone(r.thread, [client.id, peer.id]);
+        } else {
+          send({ t: 'thread_received', card: mine });
+          peer.send({ t: 'thread_passed', card: theirs });
+          threadMilestone(r.thread, [client.id, peer.id]);
+        }
+        break;
+      }
+      case 'thread_skip': {
+        const peer = mm.peerOf(client);
+        if (peer?.threadShown?.to === client.id) { peer.threadShown = null; peer.send({ t: 'thread_declined' }); }
+        break;
+      }
+      case 'thread_accept': {
+        const th = threads.byCode(msg.code);
+        if (!th) return send({ t: 'thread_error', code: 'gone' });
+        const r = threads.accept(th.id, client.id, now);
+        if (r.error) return send({ t: 'thread_error', code: r.error });
+        client.threadOffer = null;
+        db.event('thread_accept', client.id, r.thread.hops, r.thread.kind);
+        send({ t: 'thread_pocket', card: await threadCardFor(r.thread) });
+        break;
+      }
+      case 'thread_drop': {
+        const th = threads.release(client.id);
+        if (th) db.event('thread_drop', client.id, th.hops, th.kind);
+        send({ t: 'thread_pocket', card: null });
+        break;
+      }
+      case 'thread_page': {
+        const code = String(msg.code || '').slice(0, 20);
+        const th = threads.byCode(code);
+        if (!th || th.status === 'archived') return send({ t: 'thread_page', code, card: null });
+        send({ t: 'thread_page', code, card: await threadCardFor(th) });
+        break;
+      }
+    }
+  }
+
   ws.on('message', raw => {
     let msg;
     try { msg = JSON.parse(raw); } catch { return; }
@@ -998,6 +1184,7 @@ wss.on('connection', (ws, req) => {
         requeue(mm.leave(client));
         if (client.duo) duos.leave(client);
         mm.enqueue(client);
+        if (mm.isWaiting(client)) offerThread().catch(e => console.error('thread offer:', e.message));
         break;
       }
       case 'stop':
@@ -1211,6 +1398,10 @@ wss.on('connection', (ws, req) => {
       case 'duo_stop': case 'duo_leave': case 'duo_signal':
         onDuo(msg);
         break;
+      case 'thread_start': case 'thread_show': case 'thread_take': case 'thread_skip':
+      case 'thread_accept': case 'thread_drop': case 'thread_page': case 'thread_seen':
+        onThread(msg).catch(e => console.error('thread:', e.message));
+        break;
     }
   });
 
@@ -1241,6 +1432,12 @@ setInterval(() => {
 }, 30_000).unref();
 
 setInterval(() => mm.tick(), 3_000).unref();
+
+// Нити: застрявшие — в пул, старые — финал или архив; завершённым по сроку — уведомление участникам
+setInterval(() => {
+  try { for (const th of threads.tick()) notifyThreadDone(th); }
+  catch (e) { console.error('threads tick:', e.message); }
+}, 60_000).unref();
 
 // Кадры на модерацию обязательны: без них разговор прерывается (модифицированный клиент, выключенная камера, свернутое приложение)
 function enforceFrames(now = Date.now()) {

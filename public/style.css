@@ -367,7 +367,7 @@ a { color: var(--accent); text-decoration: none; font-weight: 600; }
 .rail-btn.on { background: rgba(255,255,255,.88); color: #3c4ad8; }
 .rail-btn.vibe.on { background: var(--grad); color: #fff; box-shadow: var(--glow); animation: vibe-pulse 1.6s ease-in-out infinite; }
 @keyframes vibe-pulse { 50% { box-shadow: 0 0 0 10px rgba(74,134,247,.15), var(--glow); } }
-#chat.idle .rail .rail-btn:not(#mask-btn) { opacity: 0; pointer-events: none; }
+#chat.idle .rail .rail-btn:not(#mask-btn):not(#thread-btn) { opacity: 0; pointer-events: none; }
 
 /* Оценка прошлого собеседника — в оверлее поиска */
 .rate { margin-top: 18px; display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 14px 16px; border-radius: 22px; font-size: 13px; animation: rise .4s var(--spring); }
@@ -643,3 +643,112 @@ a { color: var(--accent); text-decoration: none; font-weight: 600; }
 .sound-on { position: absolute; top: calc(var(--safe-top, 0px) + 72px); left: 50%; transform: translateX(-50%); z-index: 6;
   padding: 10px 18px; font-size: 15px; font-weight: 700; color: var(--title); animation: soundPulse 1.6s ease-in-out infinite; }
 @keyframes soundPulse { 50% { transform: translateX(-50%) scale(1.06); } }
+
+/* ---------- Нити ---------- */
+.rail-btn.thread { position: relative; }
+.th-badge { position: absolute; top: -4px; right: -4px; min-width: 22px; height: 22px; padding: 0 5px; border-radius: 11px; display: grid; place-items: center;
+  font-size: 13px; font-style: normal; background: #fff; color: #3c4ad8; box-shadow: var(--shadow-sm); animation: rise .4s var(--spring); }
+.th-badge.news { background: var(--grad); color: #fff; animation: vibe-pulse 1.6s ease-in-out infinite; }
+.rail-btn.thread.on { background: rgba(255,255,255,.22); color: #fff; }
+.rail-btn.thread.pulse { animation: th-pulse .9s var(--spring); }
+@keyframes th-pulse { 30% { transform: scale(1.25); } }
+
+/* Карта мира в ожидании */
+.thread-map { position: absolute; left: 0; right: 0; top: calc(60px + var(--safe-top)); height: 46%; width: 100%; pointer-events: none; opacity: .9;
+  mask-image: radial-gradient(70% 60% at 50% 50%, #000 55%, transparent 100%); -webkit-mask-image: radial-gradient(70% 60% at 50% 50%, #000 55%, transparent 100%); }
+.searching .dial, .searching .search-title, .searching .search-sub, .searching .btn-pill, .searching .rate { position: relative; z-index: 1; }
+
+/* Общее для карточек нити */
+.thread-card, .thread-offer { --th-a: #36d1f0; --th-b: #5a4ff0; color: #fff; }
+.th-kind { display: inline-flex; align-items: center; gap: 6px; padding: 5px 11px; border-radius: 999px; font-size: 11px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase;
+  background: linear-gradient(135deg, var(--th-a), var(--th-b)); box-shadow: 0 6px 16px -6px var(--th-b); }
+.th-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.th-head small { font-size: 12px; opacity: .85; font-variant-numeric: tabular-nums; }
+.th-from { display: block; margin-top: 10px; font-size: 16px; font-weight: 800; line-height: 1.3; }
+.th-svg { display: block; width: 100%; height: 46px; margin: 6px 0 2px; overflow: visible; }
+.th-svg .th-line { stroke-dasharray: 600; stroke-dashoffset: 600; animation: th-draw 1.4s var(--ease) forwards; filter: drop-shadow(0 0 6px var(--th-a)); }
+@keyframes th-draw { to { stroke-dashoffset: 0; } }
+.th-svg .th-knot.me { filter: drop-shadow(0 0 8px #fff); }
+.th-moves { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+.th-move { display: flex; align-items: flex-start; gap: 8px; font-size: 14px; font-weight: 600; line-height: 1.35; }
+.th-move i { font-style: normal; font-size: 16px; line-height: 1.2; flex: none; }
+.th-move.mine span { color: #fff; text-shadow: 0 0 10px rgba(255,255,255,.5); }
+.th-move span.tr { text-decoration: underline dotted rgba(255,255,255,.5); text-underline-offset: 3px; cursor: pointer; }
+.th-move span.hid, .thf-move .hid { opacity: .5; font-style: italic; }
+.th-hop { display: block; margin-top: 8px; font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; opacity: .75; }
+.th-hint { margin: 10px 0 0; font-size: 12px; line-height: 1.4; opacity: .9; padding: 8px 10px; border-radius: 12px; background: rgba(255,255,255,.1); }
+.th-btns { display: flex; gap: 8px; margin-top: 12px; justify-content: flex-end; }
+.th-btns button { height: 40px; padding: 0 16px; border-radius: 999px; font-weight: 700; font-size: 13px; background: rgba(255,255,255,.16); color: #fff;
+  transition: transform .3s var(--spring); }
+.th-btns button:active { transform: scale(.95); }
+.th-btns button.go { background: linear-gradient(135deg, var(--th-a), var(--th-b)); box-shadow: 0 8px 20px -8px var(--th-b); }
+.th-btns button:disabled { opacity: .5; }
+.th-input { width: 100%; height: 44px; margin-top: 8px; padding: 0 14px; border-radius: 14px; border: 0; outline: 0; font: inherit; font-weight: 600; color: #fff;
+  background: rgba(255,255,255,.14); box-shadow: inset 0 0 0 1px rgba(255,255,255,.18); }
+.th-input::placeholder { color: rgba(255,255,255,.55); }
+.th-input:focus { box-shadow: inset 0 0 0 2px var(--th-a); }
+.th-count { display: block; margin-top: 4px; text-align: right; font-size: 11px; opacity: .6; font-variant-numeric: tabular-nums; }
+
+/* Карточка в звонке: нижняя треть, лица не закрывает; сообщения чата поднимаются над ней */
+.thread-card { position: absolute; z-index: 9; left: 12px; right: 84px; bottom: calc(118px + var(--safe-bottom)); padding: 14px 16px; border-radius: 26px;
+  animation: rise .45s var(--spring); transform-origin: 50% 0; transition: transform .6s var(--ease), opacity .6s; }
+.thread-card.fly-away { transform: translateY(-45vh) scale(.15); opacity: 0; }
+#chat.threading .messages { bottom: calc(126px + var(--safe-bottom) + var(--th-h, 220px)); }
+#chat.composing .thread-card { display: none; }
+.th-flyknot { position: absolute; z-index: 12; left: 50%; top: 40%; width: 56px; height: 56px; margin: -28px 0 0 -28px; border-radius: 50%; display: grid; place-items: center;
+  font-size: 26px; background: linear-gradient(135deg, var(--th-a), var(--th-b)); box-shadow: 0 0 0 6px rgba(255,255,255,.18), 0 12px 30px -8px var(--th-b);
+  transition: transform .75s var(--ease), opacity .75s; pointer-events: none; }
+
+/* Прилёт нити в ожидании */
+.thread-offer { position: relative; z-index: 2; width: min(100%, 360px); margin-top: 14px; padding: 14px 16px; border-radius: 26px; text-align: left;
+  animation: rise .5s var(--spring); --lg-tint: rgba(28, 30, 44, .5); }
+.thread-offer > b { display: block; margin-top: 10px; font-size: 16px; font-weight: 800; line-height: 1.3; }
+.thread-offer > small { display: block; margin-top: 2px; font-size: 12px; opacity: .85; }
+
+/* Лист «Начать нить» */
+.th-kinds { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.th-kinds button { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 14px 6px 12px; border-radius: 20px; background: var(--fill); color: var(--text);
+  font-size: 12px; font-weight: 700; line-height: 1.2; text-align: center; transition: transform .3s var(--spring), background .2s, color .2s; }
+.th-kinds button i { font-style: normal; font-size: 26px; }
+.th-kinds button:active { transform: scale(.96); }
+.th-kinds button.on { background: var(--grad); color: #fff; box-shadow: var(--glow); }
+.th-compose input { width: 100%; height: 52px; padding: 0 16px; border-radius: 16px; border: 0; outline: 0; font: inherit; font-weight: 600; color: var(--title);
+  background: var(--fill); box-shadow: inset 0 0 0 1px var(--line); }
+.th-compose input:focus { box-shadow: inset 0 0 0 2px var(--accent); }
+.th-compose .th-count { color: var(--muted); }
+#sheet-thread .hint { margin: -8px 0 0; color: var(--muted); font-size: 12px; }
+
+/* Финал и страница нити */
+.thread-final { position: fixed; inset: 0; z-index: 19; --th-a: #36d1f0; --th-b: #5a4ff0; color: #fff; display: flex; flex-direction: column; align-items: center;
+  padding: calc(16px + var(--safe-top)) 16px calc(16px + var(--safe-bottom)); background: radial-gradient(120% 80% at 50% 0%, #1b2140, #090b18 70%); overflow: hidden; animation: thf-in .6s var(--ease); }
+@keyframes thf-in { from { opacity: 0; } }
+.thf-close { position: absolute; top: calc(10px + var(--safe-top)); right: 12px; width: 40px; height: 40px; border-radius: 50%; background: rgba(255,255,255,.12); color: #fff; font-weight: 800; z-index: 2; }
+.thf-title { margin-top: 4px; padding: 0 44px; font-size: 15px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; text-align: center; opacity: .95; }
+.thf-map { width: 100%; max-width: 520px; height: 34vh; flex: none; margin-top: 10px; }
+.thf-cap { width: 100%; max-width: 520px; min-height: 96px; margin-top: 8px; transition: opacity .5s, max-height .5s; }
+.thf-cap.fade { opacity: 0; max-height: 0; min-height: 0; overflow: hidden; }
+.thf-move { display: flex; gap: 12px; align-items: flex-start; padding: 12px 14px; border-radius: 20px; background: rgba(255,255,255,.08); animation: rise .4s var(--spring); }
+.thf-move i { font-style: normal; font-size: 28px; line-height: 1.1; }
+.thf-move small { display: block; font-size: 11px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; opacity: .7; }
+.thf-move span { display: block; margin-top: 2px; font-size: 17px; font-weight: 700; line-height: 1.35; }
+.thf-move.mine { background: linear-gradient(135deg, var(--th-a), var(--th-b)); box-shadow: 0 10px 30px -10px var(--th-b); }
+.thf-tap { margin-top: 6px; font-size: 11px; opacity: .55; letter-spacing: .06em; text-transform: uppercase; }
+.thf-body { width: 100%; max-width: 520px; flex: 1; min-height: 0; overflow-y: auto; opacity: 0; transition: opacity .6s; display: flex; flex-direction: column; gap: 12px; padding-bottom: 8px; }
+.thf-body.in { opacity: 1; }
+.thf-body h3 { margin: 4px 0 0; font-size: 22px; font-weight: 800; line-height: 1.25; text-align: center; }
+.thf-sub { text-align: center; font-size: 12px; opacity: .7; }
+.thf-story { margin: 0; padding: 16px 18px; border-radius: 22px; background: rgba(255,255,255,.08); font-size: 16px; font-weight: 600; line-height: 1.55; animation: rise .5s var(--spring); }
+.thf-cloud { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+.thf-cloud span { padding: 9px 13px; border-radius: 999px; background: rgba(255,255,255,.1); font-size: 14px; font-weight: 600; animation: rise .45s var(--spring) both; }
+.thf-cloud span.mine, .thf-post p.mine { background: linear-gradient(135deg, var(--th-a), var(--th-b)); }
+.thf-post { padding: 18px 20px; border-radius: 22px; background: rgba(255,255,255,.08); display: flex; flex-direction: column; gap: 10px; }
+.thf-post p { margin: 0; padding: 8px 12px; border-radius: 14px; background: rgba(255,255,255,.06); font-size: 15px; font-weight: 600; line-height: 1.4; animation: rise .45s var(--spring) both; }
+.thf-stamp { margin-top: 4px; padding: 14px 16px; border-radius: 22px; border: 2px dashed rgba(255,255,255,.35); text-align: center; display: flex; flex-direction: column; gap: 4px; transform: rotate(-1.5deg); animation: stamp-in .5s var(--spring); }
+@keyframes stamp-in { from { transform: rotate(-1.5deg) scale(1.3); opacity: 0; } }
+.thf-stamp b { font-size: 14px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; }
+.thf-stamp small { font-size: 12px; opacity: .85; }
+.thf-flags { font-size: 20px; letter-spacing: 2px; }
+.thf-btns { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+.thf-btns button { height: 44px; padding: 0 18px; border-radius: 999px; font-weight: 700; font-size: 13px; background: rgba(255,255,255,.14); color: #fff; }
+.thf-btns button.go { background: linear-gradient(135deg, var(--th-a), var(--th-b)); box-shadow: 0 8px 20px -8px var(--th-b); }
+@media (max-height: 700px) { .thf-map { height: 28vh; } .thf-move span { font-size: 15px; } }

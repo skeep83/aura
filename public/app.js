@@ -97,6 +97,7 @@
   let afterStart = null; // что сделать после включения камеры (принять звонок, встать в очередь эфира)
   let aiFeatures = {};
   let wrappedShown = false;
+  let threads = null;        // «Нити» — модуль подключается после игр (public/threads.js)
 
   // Языки: флаг и самоназвание
   const LANG_META = {
@@ -143,6 +144,7 @@
   }
   function setOverlay(mode) {
     showCrowdLater(mode);
+    threads?.onOverlay(mode);
     $('chat').classList.toggle('idle', Boolean(mode));
     el.searching.classList.toggle('gone', !mode);
     el.searching.classList.toggle('paused', mode === 'idle');
@@ -282,6 +284,7 @@
     el.peerChip.hidden = true;
     clearMessages();
     games.reset();
+    threads?.onCallEnd();
     $('vibe-btn').classList.remove('on');
     peerInfo = null;
     matchedAt = 0;
@@ -440,7 +443,7 @@
     ws = new WebSocket(`${proto}://${location.host}/ws`);
     const q = new URLSearchParams(location.search);
     ws.onopen = () => send({
-      t: 'auth', initData: tg?.initData || '', tz: -new Date().getTimezoneOffset(),
+      t: 'auth', initData: tg?.initData || '', tz: -new Date().getTimezoneOffset(), lang: LOCALE,
       // Браузер на компьютере: одноразовый код из Mini App или сохранённая сессия
       ...(tg?.initData ? {} : { login: q.get('login') || '', session: store.get('auraSession') || '' }),
       ...(tg?.initData ? {} : { devId: devId(), startParam: new URLSearchParams(location.search).get('startapp') || '', devCountry: new URLSearchParams(location.search).get('country') || '' }),
@@ -485,6 +488,7 @@
         setRoom(msg.room);
         if (msg.referred) toast(t('referred'), 4000);
         setupExtras();
+        threads.setup(msg);
         if (msg.openWrapped && !wrappedShown) { wrappedShown = true; setTimeout(openWrapped, 600); }
         if (msg.liveInvite && !pendingLive) {
           pendingLive = msg.liveInvite.code;
@@ -614,6 +618,10 @@
         haptic('success');
         break;
       case 'wrapped': renderWrapped(msg.data); break;
+      case 'thread_pocket': case 'thread_card': case 'thread_received': case 'thread_passed': case 'thread_declined':
+      case 'thread_final': case 'thread_offer': case 'thread_page': case 'thread_news': case 'thread_error':
+        threads.onMessage(msg);
+        break;
       case 'duo': case 'duo_waiting': case 'duo_matched': case 'duo_signal': case 'duo_ended': case 'duo_error':
         onDuoMessage(msg);
         break;
@@ -958,6 +966,15 @@
     onResult: shareStory,
     requestAiTopic: () => { if (!aiFeatures.icebreakers) return false; send({ t: 'ai_topic' }); return true; },
   });
+  // «Нити»: карман, карточка в звонке, прилёт в ожидании, финал. Общие функции передаём лениво — часть объявлена ниже
+  threads = window.AuraThreads.create({
+    send, toast, haptic, t, tn, LOCALE, flagOf, countryName, openSheet, closeSheet,
+    openShare: (...a) => openShare(...a), drawQr: (...a) => drawQr(...a), shortLink: () => shortLink(), requestPm: () => requestPm(),
+    isTalking: () => state === 'talking', getMe: () => me, appName: () => appName,
+    el: { stage: el.stage, chat: $('chat') },
+  });
+  $('thread-btn').onclick = () => threads.tap();
+
   $('games-btn').onclick = () => {
     if (duo.active) return toast(t('duo_only_1v1'));
     if (state !== 'talking') return toast(t('games_only_call'));
@@ -1112,7 +1129,7 @@
   }
   $('share-save').onclick = () => { saveShareImage(); haptic(); };
   // Отладка карточек на localhost (вне Telegram)
-  if (!tg?.initData && ['localhost', '127.0.0.1'].includes(location.hostname)) window.__aura = { shareStory };
+  if (!tg?.initData && ['localhost', '127.0.0.1'].includes(location.hostname)) window.__aura = { shareStory, get threads() { return threads; } };
   $('share-copy').onclick = () => { copyShareLink(); haptic(); };
 
   $('crowd-btn').onclick = () => {
