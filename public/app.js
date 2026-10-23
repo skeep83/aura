@@ -501,6 +501,7 @@
         setRoom(msg.room);
         if (msg.referred) toast(t('referred'), 4000);
         if (msg.inviteMissed !== null && msg.inviteMissed !== undefined) toast(t('inv_offline', { name: msg.inviteMissed || t('vibe_someone') }), 6000);
+        renderInviteChip(msg.invite?.until || 0);
         setupExtras();
         threads.setup(msg);
         if (msg.openWrapped && !wrappedShown) { wrappedShown = true; setTimeout(openWrapped, 600); }

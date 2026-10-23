@@ -752,3 +752,18 @@ test('Позвать друга: открытая ссылка на 10 мину�
   assert.equal(typeof late.ready.inviteMissed, 'string');
   for (const x of [host, guest, late]) x.ws.close();
 });
+
+test('Позвать друга: открытая ссылка переживает переподключение пригласившего', async t => {
+  const port = await startServer(t);
+  const host = await client(port, 'dev-inv-re');
+  host.send({ t: 'invite_open' });
+  const code = (await host.next('invite')).link.split('startapp=inv_')[1];
+  host.ws.close();
+  const host2 = await client(port, 'dev-inv-re');
+  assert.ok(host2.ready.invite?.until > Date.now(), 'после переподключения ссылка всё ещё открыта');
+  const guest = await client(port, 'dev-inv-re-guest', { startParam: `inv_${code}` });
+  assert.equal(guest.ready.inviteMissed, null);
+  assert.equal((await host2.next('calling')).to.online, true);
+  host2.send({ t: 'invite_close' });
+  for (const x of [host2, guest]) x.ws.close();
+});

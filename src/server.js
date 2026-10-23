@@ -463,6 +463,7 @@ function liveInviteInfo(code) {
 const CALL_RING_MS = 30_000;       // онлайн-друг: сколько звонит входящий
 const CALL_OFFLINE_MS = 120_000;   // друг не в сети: сколько ждём, пока он откроет ссылку из бота
 const INVITE_MS = 10 * 60_000;     // открытое приглашение inv_<код>: сколько ссылка ждёт друга
+const invites = new Map();          // userId -> until: открытые приглашения переживают переподключение
 const cardOf = c => ({ code: db.refCode(c.id), name: c.name || '', country: c.country || null });
 function cancelCall(c, reason = 'cancelled') {
   const call = c?.call;
@@ -605,7 +606,7 @@ function userFromSession(id, startParam = '') {
   const u = db.user(id);
   return { id, lang: u.lang || 'en', name: u.name || '', username: u.username || '', allowsPm: Boolean(u.allows_pm), startParam, web: true };
 }
-setInterval(() => { const now = Date.now(); for (const [k, v] of handoffs) if (v.exp < now) handoffs.delete(k); }, 60_000).unref();
+setInterval(() => { const now = Date.now(); for (const [k, v] of handoffs) if (v.exp < now) handoffs.delete(k); for (const [k, v] of invites) if (v < now) invites.delete(k); }, 60_000).unref();
 
 async function onStoryUpload(req, res) {
   const user = validateInitData(req.headers['x-init-data'], cfg.botToken)
@@ -793,8 +794,8 @@ wss.on('connection', (ws, req) => {
     if (sp.startsWith('inv_')) {
       const inviterId = db.resolveRef(sp.slice(4));
       const inviter = inviterId && inviterId !== user.id ? clients.get(inviterId) : null;
-      if (inviter?.invite && inviter.invite.until > Date.now() && !inviter.call && !inviter.direct && !inviter.live) {
-        inviter.invite = null;
+      if (inviter && (invites.get(inviterId) || 0) > Date.now() && !inviter.call && !inviter.direct && !inviter.live) {
+        invites.delete(inviterId);
         inviter.send({ t: 'invite', open: false });
         db.addFriends(inviter.id, user.id);
         requeue(mm.leave(inviter));
@@ -828,6 +829,7 @@ wss.on('connection', (ws, req) => {
       // Подсказка языка интерфейса по стране — если язык устройства не из восьми поддерживаемых
       langHint: countryLang(geo) || 'en',
       inviteMissed: client.inviteMissed ?? null,
+      invite: (invites.get(client.id) || 0) > Date.now() ? { until: invites.get(client.id) } : null,
       thread: threadCard, threadsSeen: u.threads_seen || 0, threadKinds: Object.fromEntries(Object.entries(threadKinds).map(([k, v]) => [k, v])),
       openThread: /^thread_[\w-]{1,20}$/.test(sp) ? sp.slice(7) : null,
     });
@@ -1068,8 +1070,11 @@ wss.on('connection', (ws, req) => {
     const second = jev.on('chatModeration') ? ['jev', jev.moderateChat(text)] : ['ai', ai.moderateChat(text, client.id)];
     second[1].then(v => {
       if (!v) return;
+      const holderId = threads.byId(th.id)?.holder_id;
       threads.hideMove(th.id, n);
       db.event('thread_hide', client.id, n, `${second[0]}:${v}`);
+      // Скрыт первый ход — нить в архиве, у держателя пустой карман
+      if (n === 1 && holderId) clients.get(holderId)?.send({ t: 'thread_pocket', card: null });
       if (clients.get(client.id) === client) onChatViolation(`${second[0]}:${v}`, text);
     }).catch(() => {});
   }
@@ -1162,6 +1167,8 @@ wss.on('connection', (ws, req) => {
         break;
       }
       case 'thread_page': {
+        if (now - (client.lastThreadPage || 0) < 1500) return;
+        client.lastThreadPage = now;
         const code = String(msg.code || '').slice(0, 20);
         const th = threads.byCode(code);
         if (!th || th.status === 'archived') return send({ t: 'thread_page', code, card: null });
@@ -1355,13 +1362,13 @@ wss.on('connection', (ws, req) => {
       case 'invite_open': {
         // Ссылка inv_<код> на 10 минут: друг откроет её — и попадёт сразу в звонок с вами
         const until = Date.now() + INVITE_MS;
-        client.invite = { until };
+        invites.set(client.id, until);
         db.event('invite_open', client.id);
         send({ t: 'invite', open: true, until, link: appLink(`inv_${db.refCode(client.id)}`) });
         break;
       }
       case 'invite_close':
-        client.invite = null;
+        invites.delete(client.id);
         send({ t: 'invite', open: false });
         break;
       case 'live_start':

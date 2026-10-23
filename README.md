@@ -11,7 +11,7 @@
 [![Mini App](https://img.shields.io/badge/Mini%20App-aura--life.online-4A86F7)](https://aura-life.online)
 ![Node](https://img.shields.io/badge/Node.js-22-339933?logo=nodedotjs&logoColor=white)
 ![WebRTC](https://img.shields.io/badge/WebRTC-P2P-333?logo=webrtc)
-![Tests](https://img.shields.io/badge/tests-51%20passing-2EA44F)
+![Tests](https://img.shields.io/badge/tests-61%20passing-2EA44F)
 ![i18n](https://img.shields.io/badge/i18n-bot%2017%20%C2%B7%20app%208-8A2BE2)
 
 </div>
@@ -63,7 +63,7 @@ flowchart LR
 ```bash
 npm install
 npm run dev      # http://localhost:8080 — без Telegram, Premium выдаётся бесплатно
-npm test         # 51 тест: подпись, матчинг, языки, комнаты, аура, вайб, паспорт, возраст, платежи, нити
+npm test         # 61 тест: подпись, матчинг, языки, комнаты, аура, вайб, паспорт, возраст, платежи, нити, Duo, приглашения
 ```
 
 Откройте две вкладки — каждая получает свою тестовую личность, и они соединятся друг с другом. Язык интерфейса: `?lang=en|ru|uk|es|pt|de|tr|id`, комната/реферал: `?startapp=room_test`.
