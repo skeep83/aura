@@ -342,6 +342,14 @@
         else setTimeout(() => el.remote.classList.remove('veil'), 1500); // первые секунды размыто — как в Azar
         if (peer?.guess) startGuess(peer.guess);
         if (peer?.exchange) startExchange(peer.exchange);
+        // Айсбрикер: если через 5 с разговор ещё жив и тема не нужна обмену — подсказать сам.
+        // Шлёт только инициатор мэтча — иначе оба конца запросят тему и сервер ответит дважды.
+        if (aiFeatures.icebreakers && initiator) {
+          const topicPeer = peer;
+          setTimeout(() => {
+            if (state === 'talking' && peer === topicPeer && !peer?.exchange) send({ t: 'ai_topic', lang: myLangs[0] });
+          }, 5000);
+        }
         haptic('medium');
         const who = peer?.pair ? `👫 ${t('peer_pair')}` : peer?.gender === 'f' ? t('peer_f') : peer?.gender === 'm' ? t('peer_m') : '';
         const lang = (peer?.langs || []).map(l => LANG_META[l]?.[0]).filter(Boolean).join(' ');
