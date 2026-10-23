@@ -21,7 +21,7 @@
       document.documentElement.dataset.theme = dark ? 'dark' : 'light';
     })();
   </script>
-  <link rel="stylesheet" href="style.css?v=20261023">
+  <link rel="stylesheet" href="style.css?v=20261024">
 </head>
 <body>
   <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -67,8 +67,8 @@
       </linearGradient>
     </defs>
     <g class="tube">
-      <path d="M250 -40 C 330 120 360 260 230 360 C 90 470 -40 470 -20 620 C 0 760 210 760 330 900" fill="none" stroke="url(#tube)" stroke-width="64" stroke-linecap="round"/>
-      <path d="M250 -40 C 330 120 360 260 230 360 C 90 470 -40 470 -20 620 C 0 760 210 760 330 900" fill="none" stroke="url(#tube-hi)" stroke-width="14" stroke-linecap="round" transform="translate(-10 -6)" opacity=".7"/>
+      <path d="M250 -40 C 330 120 360 260 230 360 C 90 470 -40 470 -20 620 C 0 760 210 760 330 900" fill="none" stroke="url(#tube)" stroke-width="30" stroke-linecap="round"/>
+      <path d="M250 -40 C 330 120 360 260 230 360 C 90 470 -40 470 -20 620 C 0 760 210 760 330 900" fill="none" stroke="url(#tube-hi)" stroke-width="5" stroke-linecap="round" transform="translate(-6 -4)" opacity=".6"/>
     </g>
     <g class="disc d1" transform="translate(300 150) rotate(-18)">
       <ellipse cx="0" cy="9" rx="62" ry="24" fill="url(#disc-edge)"/>
@@ -225,9 +225,9 @@
     </div>
 
     <header class="topbar">
-      <div class="top-left">
-        <div class="pill lg"><span class="dot"></span><b id="online">—</b></div>
-        <button class="pill lg me-pill" id="me-pill">✨<b id="aura-val">100</b><span id="streak-val" hidden></span><span id="passport-val">🛂0</span></button>
+      <div class="top-left lg">
+        <div class="pill"><span class="dot"></span><b id="online">—</b></div>
+        <button class="pill me-pill" id="me-pill">✨<b id="aura-val">100</b><span id="streak-val" hidden></span><span id="passport-val">🛂0</span></button>
       </div>
       <div class="top-actions lg">
         <button class="icon-btn friends-btn" id="friends-btn" aria-label="Друзья"><i>👥</i><span class="dot-badge" id="friends-dot" hidden></span></button>
@@ -247,11 +247,14 @@
 
     <div class="rail" id="rail">
       <button class="rail-btn lg vibe" id="vibe-btn" aria-label="Вайб"><svg><use href="#i-spark"/></svg><span data-i="vibe">Вайб</span></button>
-      <button class="rail-btn lg" id="games-btn" aria-label="Игры"><i>🎲</i><span data-i="games">Игры</span></button>
       <button class="rail-btn lg thread" id="thread-btn" aria-label="Нить"><i>🧵</i><span data-i="thread">Нить</span><b class="th-badge" id="th-badge" hidden></b></button>
-      <button class="rail-btn lg" id="mask-btn" aria-label="Маска"><i>🎭</i><span data-i="mask">Маска</span></button>
-      <button class="rail-btn lg" id="react-btn" aria-label="Реакции"><i>💫</i><span data-i="reactions">Реакции</span></button>
-      <button class="rail-btn lg" id="moment-btn" aria-label="Момент"><i>📸</i><span data-i="moment">Момент</span></button>
+      <button class="rail-btn lg" id="rail-more" aria-label="Ещё"><i>⋯</i></button>
+      <div class="rail-sub lg" id="rail-sub" hidden>
+        <button class="rail-btn lg" id="games-btn" aria-label="Игры"><i>🎲</i><span data-i="games">Игры</span></button>
+        <button class="rail-btn lg" id="mask-btn" aria-label="Маска"><i>🎭</i><span data-i="mask">Маска</span></button>
+        <button class="rail-btn lg" id="react-btn" aria-label="Реакции"><i>💫</i><span data-i="reactions">Реакции</span></button>
+        <button class="rail-btn lg" id="moment-btn" aria-label="Момент"><i>📸</i><span data-i="moment">Момент</span></button>
+      </div>
     </div>
 
     <div class="game-layer" id="game-layer" hidden></div>
@@ -582,14 +585,14 @@
 
   <div class="toasts" id="toasts"></div>
 
-  <script src="vendor/qrcode.js?v=20261023"></script>
-  <script src="i18n.js?v=20261023"></script>
-  <script src="face.js?v=20261023"></script>
-  <script src="mask.js?v=20261023"></script>
-  <script src="games.js?v=20261023"></script>
-  <script src="worldmap.js?v=20261023"></script>
-  <script src="threads.js?v=20261023"></script>
-  <script src="duo.js?v=20261023"></script>
-  <script src="app.js?v=20261023"></script>
+  <script src="vendor/qrcode.js?v=20261024"></script>
+  <script src="i18n.js?v=20261024"></script>
+  <script src="face.js?v=20261024"></script>
+  <script src="mask.js?v=20261024"></script>
+  <script src="games.js?v=20261024"></script>
+  <script src="worldmap.js?v=20261024"></script>
+  <script src="threads.js?v=20261024"></script>
+  <script src="duo.js?v=20261024"></script>
+  <script src="app.js?v=20261024"></script>
 </body>
 </html>

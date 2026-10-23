@@ -285,6 +285,7 @@
     clearMessages();
     games.reset();
     threads?.onCallEnd();
+    if (typeof railMore === 'function') railMore(false);
     $('vibe-btn').classList.remove('on');
     peerInfo = null;
     matchedAt = 0;
@@ -974,6 +975,12 @@
     el: { stage: el.stage, chat: $('chat') },
   });
   $('thread-btn').onclick = () => threads.tap();
+  // Рейл: второстепенные кнопки раскрываются по «ещё», после разговора сворачиваются
+  function railMore(open) {
+    $('rail-sub').hidden = !open;
+    $('rail-more').classList.toggle('on', open);
+  }
+  $('rail-more').onclick = () => { railMore($('rail-sub').hidden); haptic(); };
 
   $('games-btn').onclick = () => {
     if (duo.active) return toast(t('duo_only_1v1'));
