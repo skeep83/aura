@@ -20,6 +20,7 @@ import { ChatFilter } from './chatfilter.js';
 import { createAI } from './ai.js';
 import { createJev } from './jev.js';
 import { createThreads, KINDS as THREAD_KINDS } from './threads.js';
+import { createAnalytics, normalizePlatform } from './analytics.js';
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const PUBLIC_DIR = path.join(ROOT, 'public');
@@ -55,6 +56,9 @@ const cfg = {
   cfTurnKeyId: env.CF_TURN_KEY_ID || '',
   cfTurnToken: env.CF_TURN_TOKEN || '',
   devAnon: env.DEV_ALLOW_ANON === '1',
+  // Анонимный веб-вход в проде (HOM-31): браузер без Telegram получает профиль и сессию.
+  // Отдельно от devAnon: dev-пользователи помечаются is_test в аналитике, веб-анонимы — нет.
+  webAnon: env.WEB_ANON === '1',
 };
 
 const plans = {
@@ -87,11 +91,24 @@ const GUESS_POOL = ['RU', 'UA', 'KZ', 'BY', 'UZ', 'MD', 'RO', 'PL', 'DE', 'FR', 
 
 // Без токена сервер не падает (иначе контейнер уходит в цикл перезапусков), а ждёт настройки:
 // страницы открываются, но войти нельзя — initData без токена не проверить.
-if (!cfg.botToken && !cfg.devAnon) {
+if (!cfg.botToken && !cfg.devAnon && !cfg.webAnon) {
   console.error('BOT_TOKEN не задан: режим настройки, вход в чат закрыт. Задайте токен и перезапустите.');
 }
 
 const db = new Db(path.join(DATA_DIR, 'roulette.db'), { reportsToBan: cfg.reportsToBan });
+const analytics = createAnalytics({ db, env });
+analytics.recoverSearchStates();
+// Снапшот одновременности в поиске: ровно раз в минуту в окне Aura Hour (спека §2)
+const SNAP_START = Number(env.AURA_HOUR_START_MIN ?? 20 * 60 + 45);
+const SNAP_END = Number(env.AURA_HOUR_END_MIN ?? 21 * 60 + 30);
+setInterval(() => {
+  const now = new Date();
+  const mins = now.getUTCHours() * 60 + now.getUTCMinutes();
+  if (mins < SNAP_START || mins > SNAP_END) return;
+  const sec = now.getUTCSeconds();
+  if (sec < 3 || sec > 55) return; // допущение на дедупликацию snapshot_minute
+  analytics.searchingSnapshot({});
+}, 15_000).unref();
 const stories = new StoryStore(path.join(DATA_DIR, 'stories'));
 const moderation = new Moderation({
   url: env.MODERATION_URL, token: env.MODERATION_TOKEN || '', threshold: Number(env.NSFW_THRESHOLD || 0.85),
@@ -196,6 +213,10 @@ const mm = new Matchmaker({
   },
   onPair(a, b, now, waits = [0, 0]) {
     [a, b].forEach((c, i) => db.event('match', c.id, waits[i], c.newbie ? 'newbie' : ''));
+    const callId = crypto.randomUUID();
+    a.callId = callId; b.callId = callId;
+    analytics.onMatch({ callId, a: a.id, b: b.id, sessionA: a.sessionId || null, sessionB: b.sessionId || null, at: now });
+    for (const c of [a, b]) analytics.onSearchLeave({ userId: c.id, at: now });
     for (const c of [a, b]) { c.matches = (c.matches || 0) + 1; setStanding(c); }
     // Паспорт: штамп страны собеседника
     for (const [c, o] of [[a, b], [b, a]]) {
@@ -230,6 +251,10 @@ const mm = new Matchmaker({
   onUnpair(a, b, durationMs) {
     a.vibe = b.vibe = null;
     a.threadShown = b.threadShown = null;
+    if (a.callId) {
+      analytics.onCallEnd({ callId: a.callId, at: Date.now(), reason: 'unpair' });
+      a.callId = null; b.callId = null;
+    }
     if (a.direct || b.direct) {
       const kind = a.direct || b.direct;
       for (const c of [a, b]) { c.direct = null; c.directEnded = true; }
@@ -255,7 +280,7 @@ const mm = new Matchmaker({
 let bot_ = null;
 const bot = cfg.botToken ? (bot_ = createBot({
   token: cfg.botToken, site: { get url() { return cfg.publicUrl; } }, stateFile: path.join(DATA_DIR, 'bot-profile.hash'), appName: cfg.appName, adminIds: cfg.adminIds,
-  supportContact: cfg.supportContact, plans, db, appLink, schedule,
+  supportContact: cfg.supportContact, plans, db, appLink, schedule, analytics,
   stats: () => ({ online: clients.size, ...mm.stats(), ...duos.stats(), ...live.stats(), ...threads.stats(), ...db.stats(), ...db.funnel() }),
   kick: id => kick(id),
   onSalutes: id => {
@@ -441,6 +466,7 @@ function requeue(c) {
   if (c.live?.role === 'viewer') return;
   if (c.directEnded) { c.directEnded = false; c.send({ t: 'call_ended' }); return; }
   mm.enqueue(c);
+  if (mm.isWaiting(c)) analytics.onSearchEnter({ userId: c.id, sessionId: c.sessionId || null, platform: c.platform || 'unknown' });
 }
 
 // ---------- Комнаты стримеров ----------
@@ -726,6 +752,7 @@ wss.on('connection', (ws, req) => {
 
   async function auth(msg) {
     let user = validateInitData(msg.initData, cfg.botToken);
+    let validatedKind = user ? 'initdata' : 'session';
     let session = null;
     if (!user && msg.login) {
       // Одноразовый код из Mini App → сессия браузера
@@ -734,11 +761,18 @@ wss.on('connection', (ws, req) => {
       if (h && h.exp > Date.now()) { user = userFromSession(h.userId, String(msg.startParam || '')); if (user) session = makeSession(user.id); }
     }
     if (!user && msg.session) user = userFromSession(checkSession(msg.session), String(msg.startParam || ''));
-    if (!user && cfg.devAnon) {
+    if (!user && (cfg.devAnon || cfg.webAnon)) {
+      // HOM-31: анонимный вход. dev-режим — локальная отладка (id dev-*, is_test в аналитике);
+      // webAnon — прод для браузерных пользователей: id web-* (не тестовый) + сессия 30 дней сразу,
+      // чтобы профиль переживал перезаход без sessionStorage.
+      const idOk = /^(dev|web)-[\w-]{4,40}$/.test(String(msg.devId || ''));
       user = {
-        id: msg.devId?.match?.(/^dev-[\w-]{4,40}$/) ? msg.devId : 'dev-' + crypto.randomUUID().slice(0, 8),
-        lang: 'ru', name: 'Dev', username: '', allowsPm: false, startParam: String(msg.startParam || ''),
+        id: idOk ? String(msg.devId) : (cfg.webAnon ? 'web-' + crypto.randomUUID().slice(0, 10) : 'dev-' + crypto.randomUUID().slice(0, 8)),
+        lang: cfg.devAnon ? 'ru' : String(msg.lang || 'en').slice(0, 5), name: cfg.devAnon ? 'Dev' : '', username: '', allowsPm: false,
+        startParam: String(msg.startParam || ''),
       };
+      validatedKind = 'web_anon';
+      if (cfg.webAnon) session = makeSession(user.id);
     }
     if (!user) return ws.close(4003, 'bad initData');
     clearTimeout(authTimer);
@@ -779,6 +813,7 @@ wss.on('connection', (ws, req) => {
       premium: db.isPremium(u), room, tier: auraOf(u).tier, vibe: null, rateTarget: null,
       matches: db.matchCount(user.id),
       reveal: Boolean(u.reveal), pair: Boolean(u.pair), country: geo,
+      platform: normalizePlatform(msg.platform),
       minorHist: [], fromTelegram: !user.web && !String(user.id).startsWith('dev-') || (cfg.devAnon && !user.web),
       send, close: reason => ws.close(4005, reason),
     };
@@ -821,6 +856,12 @@ wss.on('connection', (ws, req) => {
     }
     const source = sourceOf(sp, room);
     if (isNew) db.setSource(client.id, source);
+    // Аналитика v1: валидированное открытие, first touch, invite_open, return_d1/d7 (спека aura-analytics-spec)
+    client.sessionId = analytics.onValidatedOpen({
+      // Подписанный start_param доверяем; в dev-режиме — тестовый из msg; в web-сессии несогласованный tgWebAppStartParam атрибуцию не меняет
+      userId: client.id, startParam: validatedKind === 'initdata' || cfg.devAnon || validatedKind === 'web_anon' ? sp : '', kind: validatedKind,
+      platform: normalizePlatform(msg.platform),
+    }).sessionId;
     db.event('session', client.id, 0, source === 'direct' ? '' : source);
     const ice = await iceServers(user.id);
     const pocket = threads.holding(client.id);
@@ -898,10 +939,11 @@ wss.on('connection', (ws, req) => {
       // Локальная отладка: покупки без оплаты
       const chargeId = 'dev-' + crypto.randomUUID(), plan = plans[msg.plan];
       if (plan.kind === 'salute') {
-        db.recordPayment({ chargeId, userId: client.id, plan: msg.plan, stars: 0 });
+        if (db.recordPayment({ chargeId, userId: client.id, plan: msg.plan, stars: 0 })) analytics.paymentSuccess({ userId: client.id, paymentId: chargeId, amountMinor: 0, sessionId: client.sessionId || null });
         db.addSalutes(client.id, plan.count);
       } else {
         const until = db.addPayment({ chargeId, userId: client.id, plan: msg.plan, stars: 0, days: plan.days });
+        if (until) analytics.paymentSuccess({ userId: client.id, paymentId: chargeId, amountMinor: 0, sessionId: client.sessionId || null });
         client.premium = until > Date.now();
       }
       send({ t: 'me', me: profileOf(client) });
@@ -1211,7 +1253,14 @@ wss.on('connection', (ws, req) => {
         if (typeof msg.reveal === 'boolean') { client.reveal = msg.reveal; db.setReveal(client.id, msg.reveal); }
         if (typeof msg.pair === 'boolean' && msg.pair !== Boolean(client.pair)) { client.pair = msg.pair; db.setPair(client.id, msg.pair); db.event(msg.pair ? 'pair_on' : 'pair_off', client.id); }
         db.setProfile(client.id, { ...client, langs: client.baseLangs });
+        analytics.onProfileSaved({ userId: client.id, sessionId: client.sessionId || null, platform: client.platform || 'unknown' });
         send({ t: 'me', me: profileOf(client) });
+        break;
+      }
+      case 'share_click': {
+        // Пользователь вызвал системный шаринг приглашения (кнопка «Поделиться»)
+        const surface = String(msg.surface || 'invite').replace(/[^\w-]/g, '').slice(0, 24);
+        analytics.insertEvent({ eventName: 'share_click', userId: client.id, sessionId: client.sessionId || null, platform: client.platform || 'unknown', props: { share_surface: surface, share_token: `ref_${db.refCode(client.id)}` } });
         break;
       }
       case 'allow_pm':
@@ -1230,6 +1279,7 @@ wss.on('connection', (ws, req) => {
         const now = Date.now();
         if (now - lastNext < 800) return; // антиспам «Далее»
         lastNext = now;
+        analytics.onSearchLeave({ userId: client.id });
         // Стример: «Далее» — следующий зритель из очереди
         if (client.live?.role === 'host') { mm.leave(client, { t: 'peer_left', reason: 'live_turn' }); break; }
         live.leave(client);
@@ -1238,10 +1288,14 @@ wss.on('connection', (ws, req) => {
         requeue(mm.leave(client));
         if (client.duo) duos.leave(client);
         mm.enqueue(client);
-        if (mm.isWaiting(client)) offerThread().catch(e => console.error('thread offer:', e.message));
+        if (mm.isWaiting(client)) {
+          analytics.onSearchEnter({ userId: client.id, sessionId: client.sessionId || null, platform: client.platform || 'unknown' });
+          offerThread().catch(e => console.error('thread offer:', e.message));
+        }
         break;
       }
       case 'stop':
+        analytics.onSearchLeave({ userId: client.id });
         requeue(mm.leave(client));
         send({ t: 'stopped' });
         break;
@@ -1288,6 +1342,7 @@ wss.on('connection', (ws, req) => {
         const clean = v => String(v || '').replace(/[^a-z,>]/g, '').slice(0, 40);
         const tag = msg.ok ? clean(msg.chosen) : `${clean(msg.why)} local=${clean(msg.local)} remote=${clean(msg.remote)}`;
         db.event(msg.ok ? 'conn_ok' : 'conn_fail', client.id, 0, tag);
+        if (msg.ok && client.callId) analytics.onConnOk({ callId: client.callId, userId: client.id });
         console.log(`conn ${msg.ok ? 'ok' : 'FAIL'} ${tag} turn=${Boolean(msg.turn)}`);
         break;
       }
@@ -1474,6 +1529,8 @@ wss.on('connection', (ws, req) => {
   ws.on('close', () => {
     clearTimeout(authTimer);
     if (!client) return;
+    analytics.onSearchLeave({ userId: client.id });
+    if (client.callId) { analytics.onCallEnd({ callId: client.callId, at: Date.now(), reason: 'disconnect' }); client.callId = null; }
     requeue(mm.leave(client));
     clearTimeout(client.guess?.timer);
     cancelCall(client, 'gone');

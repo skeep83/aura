@@ -580,6 +580,9 @@ a { color: var(--accent); text-decoration: none; font-weight: 600; }
 .duo-join input { flex: 1; min-width: 0; height: 48px; padding: 0 16px; border-radius: 999px; border: 0; background: var(--fill); color: var(--title);
   font: inherit; font-weight: 700; letter-spacing: .1em; text-transform: lowercase; }
 .duo-join .btn-pill { margin: 0; color: var(--title); }
+/* HOM-31: кнопки честного экрана анонимного входа */
+#anon-web { max-width: 340px; margin: 22px 16px 0; }
+#anon-tg { margin-top: 10px; }
 #chat.duo-mode #vibe-btn, #chat.duo-mode #games-btn, #chat.duo-mode #moment-btn { display: none; }
 .duo-tile:nth-child(n+3) .duo-tag { top: 10px; bottom: auto; }
 

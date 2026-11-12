@@ -3,7 +3,7 @@ import crypto from 'node:crypto';
 import { botProfile, pickLang, note } from './bot-profile.js';
 
 // Бот на long polling: /start, комнаты каналов, Aura Hour, оплата Telegram Stars, поддержка, админ-команды.
-export function createBot({ token, site, stateFile, appName, adminIds, supportContact, plans, db, appLink, schedule, stats, kick, onPremium, onSalutes = () => {} }) {
+export function createBot({ token, site, stateFile, appName, adminIds, supportContact, plans, db, appLink, schedule, stats, kick, onPremium, onSalutes = () => {}, analytics = null }) {
   const api = async (method, body) => {
     const res = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
       method: 'POST',
@@ -87,6 +87,7 @@ export function createBot({ token, site, stateFile, appName, adminIds, supportCo
     const plan = plans[p];
     if (plan.kind === 'salute') {
       if (db.recordPayment({ chargeId: sp.telegram_payment_charge_id, userId: u, plan: p, stars: sp.total_amount })) {
+        analytics?.paymentSuccess({ userId: u, paymentId: sp.telegram_payment_charge_id, amountMinor: sp.total_amount });
         db.addSalutes(u, plan.count);
         db.event('salute_buy', u, sp.total_amount, p);
       }
@@ -97,6 +98,7 @@ export function createBot({ token, site, stateFile, appName, adminIds, supportCo
     const until = db.addPayment({
       chargeId: sp.telegram_payment_charge_id, userId: u, plan: p, stars: sp.total_amount, days: plan.days,
     });
+    analytics?.paymentSuccess({ userId: u, paymentId: sp.telegram_payment_charge_id, amountMinor: sp.total_amount });
     onPremium(u, until);
     db.event('premium', u, sp.total_amount, p);
     const lang = db.langOf(u) || msg.from?.language_code;
@@ -119,10 +121,12 @@ export function createBot({ token, site, stateFile, appName, adminIds, supportCo
     switch (cmd.split('@')[0]) {
       case '/start': {
         // _tgr_… — ссылка партнёрской программы Telegram (комиссию начисляет сам Telegram)
-        const param = /^(room_|ref_|inv_|duo_|ad_|src_|_tgr_|thread_)[\w-]{1,60}$|^wrapped$/.test(arg) ? arg : '';
+        const param = /^(room_|ref_|inv_|duo_|ad_|src_|a1_|r1_|_tgr_|thread_)[\w-]{1,60}$|^wrapped$/.test(arg) ? arg : '';
         if (param.startsWith('ad_')) db.event('bot_start', from, 0, param);
         if (param.startsWith('src_')) db.event('bot_start', from, 0, param);
         if (param.startsWith('_tgr_')) db.event('bot_start', from, 0, 'affiliate');
+        // Аналитика v1: касание из настоящего Bot API update фиксирует first touch по реестру
+        if (analytics && /^(a1_|r1_|src_|ref_)/.test(param)) analytics.touchFromBot({ userId: String(from), startParam: param });
         const p = profile[pickLang(msg.from?.language_code)];
         return reply(chatId, p.description, param ? linkButton(p.button, appLink(param)) : appButton(p.button));
       }

@@ -620,6 +620,42 @@ test('Компьютер: одноразовый код из Mini App → вхо
   for (const c of [app, again, reuse, forged]) c.ws.close();
 });
 
+test('HOM-31: WEB_ANON — браузер без initData входит, получает сессию и сохраняет профиль', async t => {
+  const mod = await fakeModeration();
+  t.after(() => mod.close());
+  const port = await startServer(t, {
+    DEV_ALLOW_ANON: '', WEB_ANON: '1',
+    MODERATION_URL: `http://127.0.0.1:${mod.address().port}`, MODERATION_TOKEN: 'mod-secret',
+  });
+  // Сырой клиент: только devId, без initData/login/session
+  const a = await client(port, 'web-anon-1');
+  assert.ok(a.ready.appName);
+  const token = (await a.next('session')).token; // сессия 30 дней сразу при auth
+  // healthz видит анонима живым в онлайне
+  const health = await new Promise((resolve, reject) =>
+    http.get(`http://127.0.0.1:${port}/healthz`, r => { let b = ''; r.on('data', c => b += c); r.on('end', () => resolve(JSON.parse(b))); }).on('error', reject));
+  assert.equal(health.online, 1);
+  assert.equal(health.moderation, true);
+  // Перезаход с той же подписанной сессией — тот же профиль
+  a.ws.close();
+  const again = await client(port, undefined, { session: token });
+  assert.equal(again.ready.me.shareLink, a.ready.me.shareLink);
+  // Перезаход с тем же devId без сессии — тоже тот же профиль (id стабилен)
+  const byId = await client(port, 'web-anon-1');
+  assert.equal(byId.ready.me.shareLink, a.ready.me.shareLink);
+  // Подделанная сессия — не вход (без webAnon-флага сервер вернул бы 4003; здесь — новый аноним)
+  const forged = await client(port, undefined, { session: token.slice(0, -3) + 'AAA' });
+  assert.notEqual(forged.ready.me.shareLink, a.ready.me.shareLink);
+  // Без WEB_ANON и initData вход закрыт прежним кодом 4003
+  const port2 = await startServer(t, { DEV_ALLOW_ANON: '' });
+  const ws = new WebSocket(`ws://127.0.0.1:${port2}/ws`);
+  await once(ws, 'open');
+  ws.send(JSON.stringify({ t: 'auth', initData: '', devId: 'web-nope-1' }));
+  const code = await new Promise(resolve => ws.on('close', c => resolve(c)));
+  assert.equal(code, 4003);
+  for (const c of [again, byId, forged]) c.ws.close();
+});
+
 test('Нити: старт в звонке показывается собеседнику, передача меняет держателя, карман приходит в ready', async t => {
   const port = await startServer(t, { THREAD_HOPS_WISH: '3' });
   const a = await client(port, 'dev-th-a', { devCountry: 'MD', lang: 'ru' }), b = await client(port, 'dev-th-b', { devCountry: 'AR', lang: 'es' });

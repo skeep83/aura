@@ -446,15 +446,29 @@
   }
 
   // ---------- Сервер ----------
-  // Только для локальной отладки без Telegram: своя «личность» у каждой вкладки
+  // Анонимная «личность»: dev-режим — своя у каждой вкладки (sessionStorage),
+  // веб-аноним продa (HOM-31) — переживает перезаход (localStorage) в паре с auraSession.
+  const isTg = () => Boolean(tg?.initData);
   function devId() {
-    let id = null;
-    try { id = sessionStorage.getItem('devId'); } catch {}
-    if (!id) {
-      id = 'dev-' + Math.random().toString(36).slice(2, 10);
-      try { sessionStorage.setItem('devId', id); } catch {}
-    }
+    try {
+      const id = sessionStorage.getItem('devId') || localStorage.getItem('webId');
+      if (id && /^(dev|web)-[\w-]{4,40}$/.test(id)) return id;
+    } catch {}
+    const id = (isTg() ? 'dev-' : 'web-') + Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 6);
+    try { (isTg() ? sessionStorage : localStorage).setItem(isTg() ? 'devId' : 'webId', id); } catch {}
     return id;
+  }
+
+  // Честный экран вместо ложной очереди, когда сервер отверг вход (4003, HOM-31)
+  let anonNudgeShown = false;
+  function showAnonNudge() {
+    anonNudgeShown = true;
+    state = 'idle';
+    setOverlay('idle');
+    el.searchTitle.textContent = t('anon_title');
+    el.searchSub.textContent = t('anon_sub');
+    $('anon-web').hidden = false;
+    $('anon-tg').hidden = false;
   }
 
   function connect() {
@@ -463,6 +477,7 @@
     const q = new URLSearchParams(location.search);
     ws.onopen = () => send({
       t: 'auth', initData: tg?.initData || '', tz: -new Date().getTimezoneOffset(), lang: LOCALE,
+      platform: tg?.platform || (isPhone ? 'android' : 'web'),
       // Браузер на компьютере: одноразовый код из Mini App или сохранённая сессия
       ...(tg?.initData ? {} : { login: q.get('login') || '', session: store.get('auraSession') || '' }),
       ...(tg?.initData ? {} : { devId: devId(), startParam: new URLSearchParams(location.search).get('startapp') || '', devCountry: new URLSearchParams(location.search).get('country') || '' }),
@@ -474,7 +489,12 @@
       duoInfo = null;
       renderDuo();
       if (ev.code === 4004 || state === 'banned') return;
-      if (ev.code === 4003) { toast(t('open_via_bot'), 6000); return; }
+      if (ev.code === 4003) {
+        // HOM-31: браузер без Telegram — честный экран вместо ложной очереди и ложного reconnect
+        if (!tg?.initData && !anonNudgeShown && !store.get('auraSession')) { showAnonNudge(); return; }
+        toast(t('open_via_bot'), 6000);
+        return;
+      }
       if (ev.code === 4005 && ev.reason === 'replaced') {
         state = 'idle';
         setOverlay('idle');
@@ -913,6 +933,7 @@
     if (!url) return;
     const text = t('invite_text');
     const share = `https://t.me/share/url?url=${encodeURIComponent(url)}&text=${encodeURIComponent(text)}`;
+    send({ t: 'share_click', surface: 'invite' });
     if (tg?.initData) tg.openTelegramLink(share);
     else if (navigator.share) navigator.share({ url, text }).catch(() => {});
     else { navigator.clipboard?.writeText(url).catch(() => {}); toast(t('link_copied')); }
@@ -1221,6 +1242,15 @@
   // Отладка карточек на localhost (вне Telegram)
   if (!tg?.initData && ['localhost', '127.0.0.1'].includes(location.hostname)) window.__aura = { shareStory, get threads() { return threads; } };
   $('share-copy').onclick = () => { copyShareLink(); haptic(); };
+
+  // HOM-31: честный экран 4003 — «Продолжить без Telegram» / «Открыть в Telegram»
+  $('anon-web').onclick = () => {
+    $('anon-web').hidden = true; $('anon-tg').hidden = true;
+    if (ws && ws.readyState <= WebSocket.OPEN) return; // сервер ещё принимает — дождёмся ready
+    connect(); // после ready поиск начнётся сам
+    if (store.get('consent') !== '1') { $('start').disabled = false; showScreen('onboard'); }
+  };
+  $('anon-tg').onclick = () => { tg?.openTelegramLink?.('https://t.me/you_aura_bot') || window.open('https://t.me/you_aura_bot', '_blank'); };
 
   $('crowd-btn').onclick = () => {
     const on = !me.crowd;
