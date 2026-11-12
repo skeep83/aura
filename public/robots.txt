@@ -1,0 +1,8 @@
+User-agent: *
+Allow: /
+
+# Медиа-боты
+User-agent: Googlebot-Image
+Allow: /brand/
+
+Sitemap: https://aura-life.online/sitemap.xml
