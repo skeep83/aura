@@ -1,0 +1,8 @@
+[Unit]
+Description=Aura: ежедневная выгрузка аналитики (HOM-33)
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/aura/deploy/vps/aura-export.sh

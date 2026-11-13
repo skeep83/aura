@@ -1,0 +1,12 @@
+[Unit]
+Description=Aura: таймер ежедневной выгрузки аналитики (HOM-33)
+
+[Timer]
+# 03:17 по времени VPS (Europe/Berlin) — вне окна Aura Hour 20:00–22:00;
+# 02:17 UTC, вчерашние UTC-сутки уже закрыты. Persistent догоняет пропуск после простоя.
+OnCalendar=*-*-* 03:17:00
+RandomizedDelaySec=5min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

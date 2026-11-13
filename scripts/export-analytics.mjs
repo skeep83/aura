@@ -25,8 +25,13 @@ const dayStart = Date.parse(`${date}T00:00:00Z`), dayEnd = dayStart + DAY;
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'aura-export-'));
 const snap = path.join(tmp, 'snapshot.db');
-try { execFileSync('sqlite3', [path.join(DATA_DIR, 'roulette.db'), '.backup ' + snap]); }
-catch { fs.copyFileSync(path.join(DATA_DIR, 'roulette.db'), snap); }
+// Снапшот: VACUUM INTO через node:sqlite (read-only) — консистентный снимок с учётом WAL.
+// sqlite3 CLI на хосте/в контейнере нет; копирование файла потеряло бы незакоммиченный WAL.
+try {
+  const src = new DatabaseSync(path.join(DATA_DIR, 'roulette.db'), { readOnly: true });
+  src.exec(`VACUUM INTO '${snap.replace(/'/g, "''")}'`);
+  src.close();
+} catch { fs.copyFileSync(path.join(DATA_DIR, 'roulette.db'), snap); }
 const db = new Db(snap);
 const analytics = createAnalytics({ db, env: { APP_VERSION: process.env.APP_VERSION || 'export' } });
 const d = db.db;
@@ -36,8 +41,11 @@ const csvEscape = v => {
   const s = String(v);
   return /[",\n]/.test(s) ? '"' + s.replaceAll('"', '""') + '"' : s;
 };
-const csv = (header, rows) => [header.join(','), ...rows.map(r => r.map(csvEscape).join(','))].join('\n') + '\n';
+// Строка CSV: принимает и массив значений, и объект (тогда берёт поля по заголовку).
+const csv = (header, rows) => [header.join(','), ...rows.map(r => (Array.isArray(r) ? r : header.map(h => r[h])).map(csvEscape).join(','))].join('\n') + '\n';
 const sha256 = buf => crypto.createHash('sha256').update(buf).digest('hex');
+const CRC_TABLE = new Uint32Array(256).map((_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; return c >>> 0; });
+function crc32(buf) { let c = 0xffffffff; for (const b of buf) c = CRC_TABLE[(c ^ b) & 0xff] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; }
 const codeVersion = (() => { try { return execFileSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: path.join(process.cwd()) }).toString().trim(); } catch { return process.env.APP_VERSION || 'unknown'; } })();
 
 // users.csv
@@ -96,7 +104,7 @@ const fua = q(`SELECT COUNT(DISTINCT user_id) n FROM events_v2 WHERE event_name=
 const good = q(`SELECT COUNT(*) n FROM events_v2 WHERE event_name='good_conversation' AND occurred_at_utc>=? AND occurred_at_utc<? AND ${notTest}`, from, new Date(dayEnd).toISOString()).n;
 const refFua = q(`SELECT COUNT(*) n FROM events_v2 WHERE event_name='referred_first_useful_action' AND occurred_at_utc>=? AND occurred_at_utc<? AND ${notTest}`, from, new Date(dayEnd).toISOString()).n;
 const invites = q(`SELECT COUNT(*) n FROM events_v2 WHERE event_name='invite_open' AND occurred_at_utc>=? AND occurred_at_utc<? AND ${notTest}`, from, new Date(dayEnd).toISOString()).n;
-const payN = q(`SELECT COUNT(DISTINCT payment_id) n FROM payments p WHERE at>=? AND at<? AND refunded=0 AND NOT EXISTS (SELECT 1 FROM users u WHERE u.id=p.user_id AND u.is_test=1)`, dayStart, dayEnd).n;
+const payN = q(`SELECT COUNT(DISTINCT charge_id) n FROM payments p WHERE at>=? AND at<? AND refunded=0 AND NOT EXISTS (SELECT 1 FROM users u WHERE u.id=p.user_id AND u.is_test=1)`, dayStart, dayEnd).n;
 // D1/D7 когорты: n/N по созревшим данным (числитель — авторизованные mini_app_open ровно на D0+1/D0+7)
 function cohort(n) {
   const den = q(`SELECT COUNT(*) n FROM users WHERE first_activation_at>=? AND first_activation_at<? AND is_test=0`, dayStart - n * DAY, dayEnd - n * DAY).n;
@@ -115,6 +123,7 @@ const totals = [{
   return_d1_n: d1.n, return_d1_den: d1.den, return_d7_n: d7.n, return_d7_den: d7.den,
   payment_success_count: payN, search_snapshots_expected: snapsExpected, search_snapshots_present: snapsPresent,
 }];
+const sourceCols = ['date_utc', 'utm_source', 'utm_medium', 'utm_campaign', 'placement_id', 'creative_id', 'activated_users'];
 const sources = d.prepare(`
   SELECT date(occurred_at_utc) date_utc, COALESCE(NULLIF(utm_source,''),'unknown') utm_source,
     COALESCE(utm_medium,'') utm_medium, COALESCE(utm_campaign,'') utm_campaign,
@@ -122,7 +131,8 @@ const sources = d.prepare(`
     COUNT(DISTINCT user_id) activated_users
   FROM events_v2 WHERE event_name='first_useful_action' AND occurred_at_utc>=? AND occurred_at_utc<?
     AND user_id NOT LIKE 'dev-%' AND is_test=0
-  GROUP BY 1,2,3,4,5,6 ORDER BY activated_users DESC`).all(from, new Date(dayEnd).toISOString());
+  GROUP BY 1,2,3,4,5,6 ORDER BY activated_users DESC`).all(from, new Date(dayEnd).toISOString())
+  .map(s => sourceCols.map(c => s[c] ?? ''));
 
 const files = {
   'users.csv': csv(Object.keys(users[0] || { user_id: '' }), users),
@@ -182,6 +192,3 @@ try {
   console.log(dir + ' (zip не собран: ' + e.message + ')');
 }
 
-// CRC32
-const CRC_TABLE = new Uint32Array(256).map((_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; return c >>> 0; });
-function crc32(buf) { let c = 0xffffffff; for (const b of buf) c = CRC_TABLE[(c ^ b) & 0xff] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; }
