@@ -73,6 +73,8 @@ sequenceDiagram
 
 **Сервер → клиент:** `ready`, `me`, `online`, `waiting`, `matched`, `signal`, `chat`, `game`, `peer_left`, `stopped`, `round_end`, `rate_prompt`, `rated`, `vibe_sent`, `vibe_match`, `streak`, `referral`, `stamp`, `guess_result`, `react`, `need_salutes`, `compliment`, `complimented`, `wrapped`, `event`, `room`, `reported`, `warning`, `banned`, `invoice`, `error`, `duo`, `duo_waiting`, `duo_matched`, `duo_signal`, `duo_ended`, `duo_error`, `invite` (open, until, link), `thread_pocket`, `thread_card` (role holder/peer, canTake), `thread_received`, `thread_passed`, `thread_declined`, `thread_final` (closer), `thread_offer`, `thread_page`, `thread_news`, `thread_error`.
 
+`ready` несёт блок `account` (способ входа, привязанные входы, имя и аватар из соцсети, список включённых провайдеров) — из него собирается экран аккаунта; при пустом `AUTH_PROVIDERS` список провайдеров пуст и кнопок входа в интерфейсе нет.
+
 ## Вирусные механики
 
 | Фича | Как устроено |
@@ -125,9 +127,22 @@ sequenceDiagram
 | `passport` | страны, с которыми поговорил пользователь |
 | `compliments` | анонимные комплименты (кому, от кого, вид, время) |
 | `threads`, `thread_moves`, `thread_tr` | нити (код, тип, автор, ходы, держатель, статус live/pool/done/archived), ходы (кто, страна, язык, текст в оригинале, скрыт модерацией), переводы ходов по языкам (n = 0 — заголовок истории) |
-| `events` | события для метрик: session, match, call_end, talk, vibe, vibe_match, guess_ok, compliment, salute, salute_buy, duo_create/join/call, report, conn_ok/fail, nsfw, age_block, premium, thread_start/show/move/done/accept/drop/hide |
+| `identities` | внешние входы: `(provider, provider_uid)` → `users.id`, e-mail, имя, аватар, время привязки и последнего входа |
+| `events` | события для метрик: session, match, call_end, talk, vibe, vibe_match, guess_ok, compliment, salute, salute_buy, duo_create/join/call, report, conn_ok/fail, nsfw, age_block, premium, thread_start/show/move/done/accept/drop/hide, web_login_start/ok/fail, account_link, account_merge, account_delete |
 
 Миграции — добавлением колонок при старте (`Db` → `USER_COLUMNS`), данные существующих установок не теряются.
+
+## Вход (Telegram и сайт)
+
+`users.id` — Telegram ID у телеграмных, `web-*` у браузерных; префиксы не меняются, на них опираются аналитика и `is_test`.
+
+- **Mini App** — подпись `initData` (`src/auth.js`), на сервере ничего не хранится.
+- **Браузер** — анонимный профиль `web-*` при `WEB_ANON=1` и вход через провайдера при непустом `AUTH_PROVIDERS` (`src/webauth.js`). Вход необязателен, анонимный профиль остаётся входом по умолчанию.
+- Порядок в `auth()`: `initData` → одноразовый `login`-код из Mini App → cookie `aura_session` → токен в сообщении `auth` → анонимный вход.
+- Сессия — тот же stateless HMAC-токен `id.ts.sig`; cookie `aura_session` (HttpOnly, Secure, SameSite=Lax, 30 дней) добавилась к старому пути, а не заменила его.
+- Маршруты: `GET /auth/providers`, `GET /auth/:provider/start|callback`, `POST /auth/telegram/callback`, `POST /auth/link/:provider`, `POST /auth/logout`, `POST /auth/delete`. State+PKCE — в подписанной одноразовой cookie `aura_oauth` (TTL 10 минут), возврат только на свои адреса, rate limit по IP.
+- Привязка и слияние: известная привязка ведёт в свой аккаунт; новая привязка апгрейдит открытый анонимный профиль, а не создаёт второй; Telegram Login даёт тот же `users.id`, что мини-апп. Слияние мягкое (`users.merged_into`): нажитое переносится, события остаются на прежнем id, повторный вызов ничего не делает. Автосвязка разных провайдеров по одинаковому e-mail запрещена.
+- Бан живёт на аккаунте и поэтому распространяется на все его привязки; слияние берёт максимальный срок бана, а `web-*` id с привязанным входом (или уже слитый) анонимным путём не открывается — чистка `localStorage` не помогает.
 
 ## Модерация и безопасность
 

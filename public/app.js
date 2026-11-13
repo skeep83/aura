@@ -54,6 +54,7 @@
   const store = {
     get: k => { try { return localStorage.getItem(k); } catch { return null; } },
     set: (k, v) => { try { localStorage.setItem(k, v); } catch {} },
+    del: k => { try { localStorage.removeItem(k); } catch {} },
   };
   // HOM-36: веб-атрибуция ?src=<токен> / ?ref=<код>. Правило первого касания: сохранённое
   // не перезаписывается повторным открытием. Хранилище — localStorage: переживает онбординг,
@@ -539,6 +540,7 @@
         // Язык устройства не из восьми — интерфейс на языке страны (например, Испания → испанский)
         if (msg.langHint && window.AuraI18n.fallback && window.AuraI18n.setLang(msg.langHint)) { renderLangs(); renderComplChips(); }
         setMe(msg.me);
+        setAccount(msg.account);
         setOnline(msg.online);
         setEvent(msg.event);
         setRoom(msg.room);
@@ -954,6 +956,145 @@
     else { navigator.clipboard?.writeText(url).catch(() => {}); toast(t('link_copied')); }
     haptic();
   }
+  // ---------- Вход на сайте (HOM-39): «сохранить профиль», привязки, выход, удаление ----------
+  // Вход необязателен: анонимный профиль остаётся входом по умолчанию, стены регистрации нет.
+  // Внутри Telegram кнопок соцсетей не показываем — там вход уже есть через initData (план §4.4).
+  let account = { providers: [], logins: [], authKind: '', displayName: '', telegramBot: '' };
+  const PROVIDER_EMOJI = { telegram: '✈️', google: '🔎', yandex: '🟡', vk: '🔷', email: '✉️' };
+  const providerName = p => p.charAt(0).toUpperCase() + p.slice(1);
+  const loggedIn = () => account.logins.length > 0;
+
+  function setAccount(a) {
+    account = { providers: [], logins: [], authKind: '', displayName: '', telegramBot: '', ...(a || {}) };
+    const off = isTg() || !account.providers.length;
+    $('login-onboard').hidden = off || loggedIn();
+    $('account-open').hidden = off;
+    $('account-open-text').textContent = t(loggedIn() ? 'account' : 'save_profile');
+    loginFeedback();
+    if (off) return;
+    renderLoginButtons($('login-onboard-btns'), $('login-onboard-tg'), false);
+    renderAccountSheet();
+  }
+
+  // Кнопки провайдеров — обычные list-btn; Telegram — официальный виджет (ему нужен /setdomain у @BotFather)
+  function renderLoginButtons(box, tgBox, link) {
+    const taken = new Set(account.logins.map(l => l.provider));
+    box.textContent = '';
+    for (const p of account.providers) {
+      if (p === 'telegram' || (link && taken.has(p))) continue;
+      const b = document.createElement('button');
+      b.className = 'list-btn';
+      b.innerHTML = '<i></i><span></span>';
+      b.querySelector('i').textContent = PROVIDER_EMOJI[p] || '🔑';
+      b.querySelector('span').textContent = t('login_via', { name: providerName(p) });
+      b.onclick = () => startLogin(p, link);
+      box.append(b);
+    }
+    tgBox.textContent = '';
+    if (account.providers.includes('telegram') && account.telegramBot && !(link && taken.has('telegram'))) {
+      const s = document.createElement('script');
+      s.async = true;
+      s.src = 'https://telegram.org/js/telegram-widget.js?22';
+      s.setAttribute('data-telegram-login', account.telegramBot);
+      s.setAttribute('data-size', 'large');
+      s.setAttribute('data-radius', '20');
+      s.setAttribute('data-userpic', 'false');
+      s.setAttribute('data-lang', window.AuraI18n.lang);
+      s.setAttribute('data-onauth', 'AuraAuth.telegram(user)');
+      tgBox.append(s);
+    }
+  }
+
+  // Виджет Telegram зовёт глобальную функцию: вошедшему это привязка, анониму — вход
+  window.AuraAuth = {
+    telegram: async user => {
+      try {
+        const res = await fetch('/auth/telegram/callback', {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ ...user, link: loggedIn() ? '1' : '', anon_session: store.get('auraSession') || '' }),
+        });
+        if (!res.ok) return loginFailed((await res.json().catch(() => ({}))).error);
+        afterLogin();
+      } catch { loginFailed('fail'); }
+    },
+  };
+
+  function startLogin(p, link) {
+    try { sessionStorage.setItem('auraLoginGo', '1'); } catch {}
+    const back = location.pathname + location.search;
+    if (link) {
+      fetch(`/auth/link/${p}?return=${encodeURIComponent(back)}`, { method: 'POST' })
+        .then(r => (r.ok ? r.json() : Promise.reject(new Error('link'))))
+        .then(d => { location.href = d.url; })
+        .catch(() => loginFailed('fail'));
+      return;
+    }
+    const q = new URLSearchParams({ return: back });
+    // Анонимный профиль живёт в localStorage: его сессия — доказательство, что он наш, и его не потеряем
+    const anon = store.get('auraSession');
+    if (anon) q.set('anon_session', anon);
+    location.href = `/auth/${p}/start?${q}`;
+  }
+
+  function afterLogin() {
+    try { sessionStorage.removeItem('auraLoginGo'); } catch {}
+    toast(t('logged_in'), 3500);
+    haptic('success');
+    setTimeout(() => location.reload(), 700); // cookie уже есть — переподключаемся уже аккаунтом
+  }
+  function loginFailed(code) {
+    toast(t({ banned: 'login_banned', linked_elsewhere: 'login_taken' }[code] || 'login_fail'), 4000);
+  }
+  // Ошибка входа приходит в адресной строке (?auth_error=): честный текст и чистый адрес
+  function loginFeedback() {
+    const q = new URLSearchParams(location.search);
+    const err = q.get('auth_error');
+    if (err) {
+      loginFailed(err);
+      q.delete('auth_error');
+      history.replaceState(null, '', location.pathname + (q.toString() ? `?${q}` : ''));
+    }
+    let returned = false;
+    try {
+      returned = sessionStorage.getItem('auraLoginGo') === '1';
+      if (returned) sessionStorage.removeItem('auraLoginGo');
+    } catch {}
+    if (returned && !err && loggedIn()) { toast(t('logged_in'), 3500); haptic('success'); }
+  }
+
+  function renderAccountSheet() {
+    const list = $('account-logins');
+    list.textContent = '';
+    const row = (icon, text) => {
+      const li = document.createElement('li');
+      li.innerHTML = `<svg><use href="#${icon}"/></svg><span></span>`;
+      li.querySelector('span').textContent = text;
+      list.append(li);
+    };
+    for (const l of account.logins) row('i-check', [providerName(l.provider), l.email || l.name].filter(Boolean).join(' · '));
+    if (!account.logins.length) row('i-eye-off', t('account_none'));
+    $('account-actions').hidden = !loggedIn();
+    renderLoginButtons($('account-add-btns'), $('account-add-tg'), loggedIn());
+    $('account-add').hidden = !$('account-add-btns').children.length && !$('account-add-tg').children.length;
+  }
+
+  $('account-open').onclick = () => { closeSheet(); renderAccountSheet(); openSheet('sheet-account'); haptic(); };
+  $('logout-btn').onclick = async () => {
+    await fetch('/auth/logout', { method: 'POST' }).catch(() => {});
+    // Анонимный токен и id этого браузера гасим: иначе следующий заход вернёт в тот же аккаунт
+    store.del('auraSession');
+    store.del('webId');
+    location.reload();
+  };
+  $('delete-btn').onclick = async () => {
+    if (!confirm(t('delete_confirm'))) return;
+    const res = await fetch('/auth/delete', { method: 'POST' }).catch(() => null);
+    if (!res?.ok) return loginFailed('fail');
+    store.del('auraSession');
+    store.del('webId');
+    location.reload();
+  };
+
   // ---------- Позвать друга: в звонок по открытой ссылке, в Duo, из контактов телефона или просто в Aura ----------
   let inviteTimer = null, inviteVia = null; // 'share' | 'contacts'
   const telegramShare = (url, text) => {

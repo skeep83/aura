@@ -526,6 +526,48 @@ test('привязка второго входа, выход и удаление
   fresh3.ws.close();
 });
 
+// ---------- Интерфейс входа: разметка и переводы ----------
+
+test('интерфейс входа: нужные id в разметке и ключи i18n на всех восьми языках', () => {
+  const html = fs.readFileSync('public/index.html', 'utf8');
+  const app = fs.readFileSync('public/app.js', 'utf8');
+  // Экран входа в онбординге, «Сохранить профиль» в настройках, экран аккаунта
+  for (const id of ['login-onboard', 'login-onboard-btns', 'login-onboard-tg', 'account-open', 'account-open-text',
+    'sheet-account', 'account-logins', 'account-add', 'account-add-btns', 'account-add-tg', 'account-actions',
+    'logout-btn', 'delete-btn']) {
+    assert.ok(html.includes(`id="${id}"`), 'в index.html нет id ' + id);
+    assert.ok(app.includes(`'${id}'`), 'app.js не использует id ' + id);
+  }
+  // Внутри Telegram соцкнопок быть не должно (план §4.4) — проверяем само условие
+  assert.match(app, /const off = isTg\(\) \|\| !account\.providers\.length/);
+
+  // Словарь грузим как в браузере: это обычный IIFE на window
+  const i18n = loadI18n();
+  const keys = [...new Set([...html.matchAll(/data-i(?:h|ph|a)?="([\w.]+)"/g)].map(m => m[1]))];
+  const added = ['save_profile', 'save_profile_sub', 'account', 'account_sub', 'account_logins', 'account_add',
+    'account_none', 'login_via', 'logout', 'delete_account', 'delete_sub', 'delete_confirm', 'logged_in',
+    'login_fail', 'login_banned', 'login_taken'];
+  for (const lang of ['en', 'ru', 'uk', 'es', 'pt', 'de', 'tr', 'id']) {
+    i18n.setLang(lang);
+    for (const k of keys) assert.ok(i18n.t(k).length > 0, `${lang}: пустой перевод ${k}`);
+    for (const k of added) assert.notEqual(i18n.t(k), k, `${lang}: нет перевода ${k}`);
+    assert.match(i18n.t('login_via', { name: 'Telegram' }), /Telegram/);
+  }
+});
+
+// Словарь интерфейса в Node: подставляем минимальные браузерные объекты
+function loadI18n() {
+  const sandbox = {
+    window: {},
+    navigator: { languages: ['en'], language: 'en' },
+    location: { search: '' },
+    document: { documentElement: {}, querySelectorAll: () => [], title: '' },
+  };
+  new Function('window', 'navigator', 'location', 'document', fs.readFileSync('public/i18n.js', 'utf8'))(
+    sandbox.window, sandbox.navigator, sandbox.location, sandbox.document);
+  return sandbox.window.AuraI18n;
+}
+
 // Подпись initData мини-аппа — та же функция, что в core.test.js
 function signInitData(fields, token = TOKEN) {
   const params = new URLSearchParams(fields);

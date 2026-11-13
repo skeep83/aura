@@ -151,6 +151,14 @@
         <li><svg><use href="#i-shield"/></svg><span data-i="perk_mod">Автомодерация 18+</span></li>
         <li><svg><use href="#i-eye-off"/></svg><span data-i="perk_rec">Без записи видео</span></li>
       </ul>
+
+      <!-- HOM-39: вход по желанию. Без AUTH_PROVIDERS и внутри Telegram блок скрыт -->
+      <div class="field" id="login-onboard" hidden>
+        <div class="label" data-i="save_profile">Сохранить профиль</div>
+        <div class="extras" id="login-onboard-btns"></div>
+        <div id="login-onboard-tg"></div>
+        <p class="hint" data-i="save_profile_sub">По желанию. Войдите — и аура, друзья и паспорт останутся с вами на любом устройстве</p>
+      </div>
       <div class="home-bar"></div>
     </div>
   </main>
@@ -407,10 +415,32 @@
       </div>
     </div>
     <div class="extras">
+      <!-- HOM-39: «Сохранить профиль» для анонима, «Аккаунт» — для вошедшего -->
+      <button class="list-btn" id="account-open" hidden><i>🔐</i><span id="account-open-text" data-i="save_profile">Сохранить профиль</span></button>
       <button class="list-btn" id="live-open"><i>🎙</i><span data-i="live_btn">Комната стримера</span></button>
       <button class="list-btn" id="invite-btn2"><i>🎁</i><span data-i="invite_short">Пригласить друга — Premium обоим</span></button>
       <button class="list-btn" id="status-btn" hidden><i>✨</i><span data-i="status_btn">Поставить статус «в Aura»</span></button>
       <button class="list-btn" id="home-btn" hidden><i>📲</i><span data-i="home_btn">Добавить на главный экран</span></button>
+    </div>
+  </section>
+
+  <!-- HOM-39: экран аккаунта — привязанные входы, добавить вход, выход, удаление -->
+  <section class="lg sheet" id="sheet-account" hidden>
+    <div class="grip"></div>
+    <h2 data-i="account">Аккаунт</h2>
+    <p class="sheet-sub" data-i="account_sub">Вход — по желанию: аура, друзья и паспорт переезжают за вами в любой браузер</p>
+    <div class="field">
+      <div class="label" data-i="account_logins">Привязанные входы</div>
+      <ul class="perks" id="account-logins"></ul>
+    </div>
+    <div class="field" id="account-add" hidden>
+      <div class="label" data-i="account_add">Добавить вход</div>
+      <div class="extras" id="account-add-btns"></div>
+      <div id="account-add-tg"></div>
+    </div>
+    <div class="extras" id="account-actions" hidden>
+      <button class="list-btn" id="logout-btn"><i>🚪</i><span data-i="logout">Выйти</span></button>
+      <button class="list-btn" id="delete-btn"><i>🗑</i><span><b data-i="delete_account">Удалить аккаунт</b><small data-i="delete_sub">Профиль, друзья и штампы паспорта удалятся без возврата</small></span></button>
     </div>
   </section>
 
@@ -647,7 +677,7 @@
   <div class="toasts" id="toasts"></div>
 
   <script src="vendor/qrcode.js?v=20261026"></script>
-  <script src="i18n.js?v=20261026"></script>
+  <script src="i18n.js?v=20261113"></script>
   <script src="face.js?v=20261026"></script>
   <script src="mask.js?v=20261026"></script>
   <script src="games.js?v=20261026"></script>
