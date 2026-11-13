@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
   <meta name="theme-color" content="#e7e9f4">
   <title>Aura — видеочат со всем миром</title>
-  <meta name="description" content="Видеочат со случайными людьми со всего мира. Один свайп — новый собеседник, подбор по языку, игры в звонке, автомодерация 18+. Прямо в Telegram, без установки.">
+  <meta name="description" content="Aura — случайный видеочат прямо в браузере, без установки приложения. 18+, AI-модерация в реальном времени. Бесплатно, без регистрации.">
   <link rel="canonical" href="https://aura-life.online/">
   <link rel="alternate" hreflang="en" href="https://aura-life.online/?lang=en">
   <link rel="alternate" hreflang="ru" href="https://aura-life.online/?lang=ru">
@@ -19,10 +19,15 @@
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://aura-life.online/">
   <meta property="og:site_name" content="Aura">
-  <meta property="og:image" content="https://aura-life.online/brand/avatar-640.png">
-  <meta property="og:title" content="Aura — видеочат со всем миром">
-  <meta property="og:description" content="Один свайп — новый собеседник. Подбор по языку, автомодерация 18+. Прямо в Telegram.">
-  <meta name="twitter:card" content="summary">
+  <meta property="og:image" content="https://aura-life.online/brand/og-ru-1200x630.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:title" content="Aura — случайный видеочат без установки приложения">
+  <meta property="og:description" content="Видеочат со случайным собеседником прямо в браузере. 18+, AI-модерация, бесплатно, без регистрации.">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Aura — случайный видеочат без установки приложения">
+  <meta name="twitter:description" content="Видеочат со случайным собеседником прямо в браузере. 18+, AI-модерация, бесплатно, без регистрации.">
+  <meta name="twitter:image" content="https://aura-life.online/brand/og-ru-1200x630.png">
   <link rel="manifest" href="/manifest.json">
   <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
   <link rel="icon" href="icon.svg" type="image/svg+xml">
@@ -39,6 +44,14 @@
       var dark = pref === 'dark' || (pref !== 'light' && (tg && tg.colorScheme ? tg.colorScheme === 'dark'
         : window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches));
       document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+    })();
+    // Canonical должен ссылаться на саму себя вместе с ?lang= — иначе конфликтует с hreflang
+    (function () {
+      var l = new URLSearchParams(location.search).get('lang');
+      if (l) {
+        var c = document.querySelector('link[rel="canonical"]');
+        if (c) c.href = 'https://aura-life.online/?lang=' + l;
+      }
     })();
   </script>
   <link rel="stylesheet" href="style.css?v=20261026">

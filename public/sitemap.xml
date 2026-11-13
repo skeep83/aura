@@ -1,35 +1,205 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">
+
   <url>
     <loc>https://aura-life.online/</loc>
-    <xhtml:link rel="alternate" hreflang="en" href="https://aura-life.online/?lang=en"/>
+    <lastmod>2026-11-12</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>1.0</priority>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://aura-life.online/"/>
     <xhtml:link rel="alternate" hreflang="ru" href="https://aura-life.online/?lang=ru"/>
-    <xhtml:link rel="alternate" hreflang="uk" href="https://aura-life.online/?lang=uk"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://aura-life.online/?lang=en"/>
     <xhtml:link rel="alternate" hreflang="es" href="https://aura-life.online/?lang=es"/>
     <xhtml:link rel="alternate" hreflang="pt" href="https://aura-life.online/?lang=pt"/>
     <xhtml:link rel="alternate" hreflang="de" href="https://aura-life.online/?lang=de"/>
     <xhtml:link rel="alternate" hreflang="tr" href="https://aura-life.online/?lang=tr"/>
+    <xhtml:link rel="alternate" hreflang="uk" href="https://aura-life.online/?lang=uk"/>
     <xhtml:link rel="alternate" hreflang="id" href="https://aura-life.online/?lang=id"/>
-    <xhtml:link rel="alternate" hreflang="x-default" href="https://aura-life.online/"/>
-    <changefreq>weekly</changefreq>
-    <priority>1.0</priority>
   </url>
-  <url><loc>https://aura-life.online/?lang=en</loc><changefreq>weekly</changefreq><priority>0.9</priority></url>
-  <url><loc>https://aura-life.online/?lang=ru</loc><changefreq>weekly</changefreq><priority>0.9</priority></url>
-  <url><loc>https://aura-life.online/?lang=uk</loc><changefreq>weekly</changefreq><priority>0.8</priority></url>
-  <url><loc>https://aura-life.online/?lang=es</loc><changefreq>weekly</changefreq><priority>0.8</priority></url>
-  <url><loc>https://aura-life.online/?lang=pt</loc><changefreq>weekly</changefreq><priority>0.8</priority></url>
-  <url><loc>https://aura-life.online/?lang=de</loc><changefreq>weekly</changefreq><priority>0.8</priority></url>
-  <url><loc>https://aura-life.online/?lang=tr</loc><changefreq>weekly</changefreq><priority>0.8</priority></url>
-  <url><loc>https://aura-life.online/?lang=id</loc><changefreq>weekly</changefreq><priority>0.8</priority></url>
+
+  <url>
+    <loc>https://aura-life.online/?lang=ru</loc>
+    <lastmod>2026-11-12</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.9</priority>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://aura-life.online/"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://aura-life.online/?lang=ru"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://aura-life.online/?lang=en"/>
+    <xhtml:link rel="alternate" hreflang="es" href="https://aura-life.online/?lang=es"/>
+    <xhtml:link rel="alternate" hreflang="pt" href="https://aura-life.online/?lang=pt"/>
+    <xhtml:link rel="alternate" hreflang="de" href="https://aura-life.online/?lang=de"/>
+    <xhtml:link rel="alternate" hreflang="tr" href="https://aura-life.online/?lang=tr"/>
+    <xhtml:link rel="alternate" hreflang="uk" href="https://aura-life.online/?lang=uk"/>
+    <xhtml:link rel="alternate" hreflang="id" href="https://aura-life.online/?lang=id"/>
+  </url>
+
+  <url>
+    <loc>https://aura-life.online/?lang=en</loc>
+    <lastmod>2026-11-12</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.9</priority>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://aura-life.online/"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://aura-life.online/?lang=ru"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://aura-life.online/?lang=en"/>
+    <xhtml:link rel="alternate" hreflang="es" href="https://aura-life.online/?lang=es"/>
+    <xhtml:link rel="alternate" hreflang="pt" href="https://aura-life.online/?lang=pt"/>
+    <xhtml:link rel="alternate" hreflang="de" href="https://aura-life.online/?lang=de"/>
+    <xhtml:link rel="alternate" hreflang="tr" href="https://aura-life.online/?lang=tr"/>
+    <xhtml:link rel="alternate" hreflang="uk" href="https://aura-life.online/?lang=uk"/>
+    <xhtml:link rel="alternate" hreflang="id" href="https://aura-life.online/?lang=id"/>
+  </url>
+
+  <url>
+    <loc>https://aura-life.online/?lang=es</loc>
+    <lastmod>2026-11-12</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://aura-life.online/"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://aura-life.online/?lang=ru"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://aura-life.online/?lang=en"/>
+    <xhtml:link rel="alternate" hreflang="es" href="https://aura-life.online/?lang=es"/>
+    <xhtml:link rel="alternate" hreflang="pt" href="https://aura-life.online/?lang=pt"/>
+    <xhtml:link rel="alternate" hreflang="de" href="https://aura-life.online/?lang=de"/>
+    <xhtml:link rel="alternate" hreflang="tr" href="https://aura-life.online/?lang=tr"/>
+    <xhtml:link rel="alternate" hreflang="uk" href="https://aura-life.online/?lang=uk"/>
+    <xhtml:link rel="alternate" hreflang="id" href="https://aura-life.online/?lang=id"/>
+  </url>
+
+  <url>
+    <loc>https://aura-life.online/?lang=pt</loc>
+    <lastmod>2026-11-12</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://aura-life.online/"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://aura-life.online/?lang=ru"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://aura-life.online/?lang=en"/>
+    <xhtml:link rel="alternate" hreflang="es" href="https://aura-life.online/?lang=es"/>
+    <xhtml:link rel="alternate" hreflang="pt" href="https://aura-life.online/?lang=pt"/>
+    <xhtml:link rel="alternate" hreflang="de" href="https://aura-life.online/?lang=de"/>
+    <xhtml:link rel="alternate" hreflang="tr" href="https://aura-life.online/?lang=tr"/>
+    <xhtml:link rel="alternate" hreflang="uk" href="https://aura-life.online/?lang=uk"/>
+    <xhtml:link rel="alternate" hreflang="id" href="https://aura-life.online/?lang=id"/>
+  </url>
+
+  <url>
+    <loc>https://aura-life.online/?lang=de</loc>
+    <lastmod>2026-11-12</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://aura-life.online/"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://aura-life.online/?lang=ru"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://aura-life.online/?lang=en"/>
+    <xhtml:link rel="alternate" hreflang="es" href="https://aura-life.online/?lang=es"/>
+    <xhtml:link rel="alternate" hreflang="pt" href="https://aura-life.online/?lang=pt"/>
+    <xhtml:link rel="alternate" hreflang="de" href="https://aura-life.online/?lang=de"/>
+    <xhtml:link rel="alternate" hreflang="tr" href="https://aura-life.online/?lang=tr"/>
+    <xhtml:link rel="alternate" hreflang="uk" href="https://aura-life.online/?lang=uk"/>
+    <xhtml:link rel="alternate" hreflang="id" href="https://aura-life.online/?lang=id"/>
+  </url>
+
+  <url>
+    <loc>https://aura-life.online/?lang=tr</loc>
+    <lastmod>2026-11-12</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://aura-life.online/"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://aura-life.online/?lang=ru"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://aura-life.online/?lang=en"/>
+    <xhtml:link rel="alternate" hreflang="es" href="https://aura-life.online/?lang=es"/>
+    <xhtml:link rel="alternate" hreflang="pt" href="https://aura-life.online/?lang=pt"/>
+    <xhtml:link rel="alternate" hreflang="de" href="https://aura-life.online/?lang=de"/>
+    <xhtml:link rel="alternate" hreflang="tr" href="https://aura-life.online/?lang=tr"/>
+    <xhtml:link rel="alternate" hreflang="uk" href="https://aura-life.online/?lang=uk"/>
+    <xhtml:link rel="alternate" hreflang="id" href="https://aura-life.online/?lang=id"/>
+  </url>
+
+  <url>
+    <loc>https://aura-life.online/?lang=uk</loc>
+    <lastmod>2026-11-12</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://aura-life.online/"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://aura-life.online/?lang=ru"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://aura-life.online/?lang=en"/>
+    <xhtml:link rel="alternate" hreflang="es" href="https://aura-life.online/?lang=es"/>
+    <xhtml:link rel="alternate" hreflang="pt" href="https://aura-life.online/?lang=pt"/>
+    <xhtml:link rel="alternate" hreflang="de" href="https://aura-life.online/?lang=de"/>
+    <xhtml:link rel="alternate" hreflang="tr" href="https://aura-life.online/?lang=tr"/>
+    <xhtml:link rel="alternate" hreflang="uk" href="https://aura-life.online/?lang=uk"/>
+    <xhtml:link rel="alternate" hreflang="id" href="https://aura-life.online/?lang=id"/>
+  </url>
+
+  <url>
+    <loc>https://aura-life.online/?lang=id</loc>
+    <lastmod>2026-11-12</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://aura-life.online/"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://aura-life.online/?lang=ru"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://aura-life.online/?lang=en"/>
+    <xhtml:link rel="alternate" hreflang="es" href="https://aura-life.online/?lang=es"/>
+    <xhtml:link rel="alternate" hreflang="pt" href="https://aura-life.online/?lang=pt"/>
+    <xhtml:link rel="alternate" hreflang="de" href="https://aura-life.online/?lang=de"/>
+    <xhtml:link rel="alternate" hreflang="tr" href="https://aura-life.online/?lang=tr"/>
+    <xhtml:link rel="alternate" hreflang="uk" href="https://aura-life.online/?lang=uk"/>
+    <xhtml:link rel="alternate" hreflang="id" href="https://aura-life.online/?lang=id"/>
+  </url>
+
   <url>
     <loc>https://aura-life.online/privacy</loc>
+    <lastmod>2026-10-11</lastmod>
     <changefreq>yearly</changefreq>
     <priority>0.3</priority>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://aura-life.online/privacy"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://aura-life.online/en/privacy"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://aura-life.online/privacy"/>
   </url>
+
+  <url>
+    <loc>https://aura-life.online/en/privacy</loc>
+    <lastmod>2026-11-12</lastmod>
+    <changefreq>yearly</changefreq>
+    <priority>0.3</priority>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://aura-life.online/privacy"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://aura-life.online/en/privacy"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://aura-life.online/privacy"/>
+  </url>
+
   <url>
     <loc>https://aura-life.online/terms</loc>
+    <lastmod>2026-10-11</lastmod>
     <changefreq>yearly</changefreq>
     <priority>0.3</priority>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://aura-life.online/terms"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://aura-life.online/en/terms"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://aura-life.online/terms"/>
   </url>
+
+  <url>
+    <loc>https://aura-life.online/en/terms</loc>
+    <lastmod>2026-11-12</lastmod>
+    <changefreq>yearly</changefreq>
+    <priority>0.3</priority>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://aura-life.online/terms"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://aura-life.online/en/terms"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://aura-life.online/terms"/>
+  </url>
+
+  <!--
+    /blog пока НЕ включён: на 12.11.2026 aura-life.online/blog отдаёт 404
+    (реверс-прокси на skeep83.github.io/aura-blog ещё не выкатан — см. HOM-27).
+    Submit URL с 404 в sitemap портит отчёт покрытия в Search Console.
+    Как только HOM-27 выкатит /blog/, добавь:
+
+    <url>
+      <loc>https://aura-life.online/blog/</loc>
+      <lastmod>YYYY-MM-DD</lastmod>
+      <changefreq>weekly</changefreq>
+      <priority>0.6</priority>
+    </url>
+
+    и отдельные <url> на каждую статью (их canonical уже должен указывать на
+    aura-life.online/blog/... согласно HOM-27).
+  -->
+
 </urlset>
