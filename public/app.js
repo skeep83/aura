@@ -960,7 +960,16 @@
   // Вход необязателен: анонимный профиль остаётся входом по умолчанию, стены регистрации нет.
   // Внутри Telegram кнопок соцсетей не показываем — там вход уже есть через initData (план §4.4).
   let account = { providers: [], logins: [], authKind: '', displayName: '', telegramBot: '' };
-  const PROVIDER_EMOJI = { telegram: '✈️', google: '🔎', yandex: '🟡', vk: '🔷', email: '✉️' };
+  const PROVIDER_EMOJI = { telegram: '✈️', yandex: '🟡', vk: '🔷', email: '✉️' };
+  // Google требует свой знак «G» на белом круге — эмодзи вместо него выглядит подделкой (HOM-40).
+  // Знак рисуем инлайном: своих цветов в палитру не добавляем, style.css не трогаем.
+  const PROVIDER_MARK = {
+    google: '<svg viewBox="0 0 48 48" width="18" height="18" aria-hidden="true" focusable="false">'
+      + '<path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9.1 3.6l6.8-6.8C35.9 2.4 30.3 0 24 0 14.6 0 6.5 5.4 2.6 13.2l7.9 6.2C12.4 13.5 17.7 9.5 24 9.5z"/>'
+      + '<path fill="#4285F4" d="M46.6 24.6c0-1.6-.1-3.1-.4-4.6H24v9.1h12.7c-.6 3-2.3 5.5-4.8 7.2l7.7 6c4.5-4.1 7-10.2 7-17.7z"/>'
+      + '<path fill="#FBBC05" d="M10.5 28.6c-.5-1.5-.8-3-.8-4.6s.3-3.2.8-4.6l-7.9-6.2C1 16.3 0 20 0 24s1 7.7 2.6 10.9l7.9-6.3z"/>'
+      + '<path fill="#34A853" d="M24 48c6.5 0 11.9-2.1 15.9-5.8l-7.7-6c-2.1 1.4-4.9 2.3-8.2 2.3-6.3 0-11.6-4-13.5-9.9l-7.9 6.2C6.5 42.6 14.6 48 24 48z"/></svg>',
+  };
   const providerName = p => p.charAt(0).toUpperCase() + p.slice(1);
   const loggedIn = () => account.logins.length > 0;
 
@@ -985,7 +994,9 @@
       const b = document.createElement('button');
       b.className = 'list-btn';
       b.innerHTML = '<i></i><span></span>';
-      b.querySelector('i').textContent = PROVIDER_EMOJI[p] || '🔑';
+      const mark = b.querySelector('i');
+      if (PROVIDER_MARK[p]) { mark.innerHTML = PROVIDER_MARK[p]; mark.style.background = '#fff'; }
+      else mark.textContent = PROVIDER_EMOJI[p] || '🔑';
       b.querySelector('span').textContent = t('login_via', { name: providerName(p) });
       b.onclick = () => startLogin(p, link);
       box.append(b);
@@ -1042,8 +1053,14 @@
     haptic('success');
     setTimeout(() => location.reload(), 700); // cookie уже есть — переподключаемся уже аккаунтом
   }
+  // Каждая причина звучит честно: отказ у провайдера — не «ошибка», а просроченный вход — не «попробуйте ещё»
+  const LOGIN_ERRORS = {
+    banned: 'login_banned', linked_elsewhere: 'login_taken',
+    provider_denied: 'login_denied', provider_error: 'login_provider',
+    state: 'login_expired', state_used: 'login_expired', no_code: 'login_expired',
+  };
   function loginFailed(code) {
-    toast(t({ banned: 'login_banned', linked_elsewhere: 'login_taken' }[code] || 'login_fail'), 4000);
+    toast(t(LOGIN_ERRORS[code] || 'login_fail'), 4000);
   }
   // Ошибка входа приходит в адресной строке (?auth_error=): честный текст и чистый адрес
   function loginFeedback() {

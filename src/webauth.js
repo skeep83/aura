@@ -8,6 +8,7 @@
 // - привязка никогда не переносит identity на другой аккаунт: это делает только явное слияние.
 import crypto from 'node:crypto';
 import { validateLoginWidget } from './auth.js';
+import { createJwks, verifyIdToken } from './oidc.js';
 
 const MIN = 60 * 1000;
 const OAUTH_TTL_MS = 10 * MIN;
@@ -16,13 +17,31 @@ const FETCH_TIMEOUT_MS = 8000;
 
 // Реестр провайдеров. kind:
 //   telegram — Login Widget (подпись ботом, без редиректов);
-//   oauth2   — authorization code + PKCE + профиль отдельным запросом (Yandex, VK, тестовый fake).
-// Google (OIDC с проверкой id_token по JWKS) добавляется в E3 — здесь намеренно нет непроверенных конфигов.
+//   oauth2   — authorization code + PKCE + профиль отдельным запросом (Yandex, VK, тестовый fake);
+//   oidc     — authorization code + PKCE, профиль берётся из проверенного id_token (Google).
 export function providersFrom(env = {}) {
   const enabled = String(env.AUTH_PROVIDERS || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
   const out = {};
   for (const name of enabled) {
     if (name === 'telegram') { out.telegram = { name, kind: 'telegram' }; continue; }
+    // Google (HOM-40): OIDC. Без client id/secret провайдер молча не включается — лучше, чем битый редирект.
+    // Эндпоинты переопределяются только для тестов, в прод-конфиге их указывать не нужно.
+    if (name === 'google' && env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET) {
+      out.google = {
+        name, kind: 'oidc',
+        authorizeUrl: env.AUTH_GOOGLE_AUTHORIZE_URL || 'https://accounts.google.com/o/oauth2/v2/auth',
+        tokenUrl: env.AUTH_GOOGLE_TOKEN_URL || 'https://oauth2.googleapis.com/token',
+        jwksUrl: env.AUTH_GOOGLE_JWKS_URL || 'https://www.googleapis.com/oauth2/v3/certs',
+        issuers: env.AUTH_GOOGLE_ISSUER ? [env.AUTH_GOOGLE_ISSUER] : ['https://accounts.google.com', 'accounts.google.com'],
+        clientId: env.GOOGLE_CLIENT_ID,
+        clientSecret: env.GOOGLE_CLIENT_SECRET,
+        scope: 'openid email profile',
+        // select_account — чтобы на общем компьютере человек видел, каким аккаунтом входит;
+        // offline-доступ нам не нужен: refresh-токены мы не храним
+        authParams: { access_type: 'online', prompt: 'select_account' },
+      };
+      continue;
+    }
     // Тестовый провайдер: только когда явно задан эндпоинт (локальный http-сервер в тестах)
     if (name === 'fake' && env.AUTH_FAKE_AUTHORIZE_URL) {
       out.fake = {
@@ -62,7 +81,7 @@ export function createWebAuth({ db, cfg, env = process.env, makeSession, checkSe
   const secure = env.AUTH_COOKIE_INSECURE !== '1';
   const cookieKey = crypto.createHash('sha256').update('aura-oauth:' + (cfg.botToken || '') + (env.SESSION_SALT || '')).digest();
   const usedStates = new Map(); // одноразовость state: nonce -> срок
-  const hits = new Map();       // rate limit: ip -> { n, reset }
+  const hits = new Map();       // rate limit: «шаг входа + ip» -> { n, reset }
   setInterval(() => {
     const now = Date.now();
     for (const [k, v] of usedStates) if (v < now) usedStates.delete(k);
@@ -70,15 +89,17 @@ export function createWebAuth({ db, cfg, env = process.env, makeSession, checkSe
   }, MIN).unref();
 
   const ipOf = req => String(req.headers['cf-connecting-ip'] || req.socket?.remoteAddress || '');
-  function rateOk(req, limit, windowMs) {
-    const ip = ipOf(req);
+  // Счётчик — на каждый шаг входа отдельно: один общий на ip съедал бы бюджет вдвое быстрее
+  // (старт + колбэк = два запроса одного входа), а за одним ip сидит целый оператор мобильной связи.
+  function rateOk(req, bucket, limit, windowMs) {
+    const key = bucket + ':' + ipOf(req);
     const now = Date.now();
-    const h = hits.get(ip);
+    const h = hits.get(key);
     if (h && now < h.reset) {
       h.n += 1;
       return h.n <= limit;
     }
-    hits.set(ip, { n: 1, reset: now + windowMs });
+    hits.set(key, { n: 1, reset: now + windowMs });
     if (hits.size > 50_000) hits.clear();
     return true;
   }
@@ -221,6 +242,25 @@ export function createWebAuth({ db, cfg, env = process.env, makeSession, checkSe
     if (!r.ok) throw new Error('token_' + r.status);
     return r.json();
   }
+  // ---------- OIDC: профиль из id_token (Google, §4.2) ----------
+  const jwksByProvider = new Map();
+  const jwksFor = p => {
+    if (!jwksByProvider.has(p.name)) jwksByProvider.set(p.name, createJwks(p.jwksUrl));
+    return jwksByProvider.get(p.name);
+  };
+  // При скоупах openid email profile Google отдаёт e-mail, имя и аватар прямо в id_token —
+  // отдельный запрос к userinfo не нужен, а подписанный токен надёжнее ответа по Bearer.
+  function profileFrom(claims) {
+    return {
+      uid: String(claims.sub),
+      email: String(claims.email || '').toLowerCase().slice(0, 190),
+      // Автосвязка разных провайдеров по e-mail запрещена и при verified=1 (§4.3) — флаг только для профиля
+      emailVerified: claims.email_verified === true || claims.email_verified === 'true',
+      name: String(claims.name || [claims.given_name, claims.family_name].filter(Boolean).join(' ') || '').slice(0, 64),
+      avatar: String(claims.picture || '').slice(0, 300),
+    };
+  }
+
   async function userinfo(p, token) {
     const r = await fetch(p.userinfoUrl, {
       headers: { authorization: `Bearer ${token}`, accept: 'application/json' },
@@ -241,19 +281,22 @@ export function createWebAuth({ db, cfg, env = process.env, makeSession, checkSe
   }
 
   const callbackUrl = (req, provider) => `${cfg.publicUrl || `http://${req.headers.host}`}/auth/${provider}/callback`;
+  const redirectKind = p => p && (p.kind === 'oauth2' || p.kind === 'oidc');
 
   function onStart(req, res, url, provider) {
     const p = providers[provider];
-    if (!p || p.kind !== 'oauth2') return json(res, 404, { error: 'provider' });
-    if (!rateOk(req, 10, 5 * MIN)) return json(res, 429, { error: 'rate' });
+    if (!redirectKind(p)) return json(res, 404, { error: 'provider' });
+    if (!rateOk(req, 'start', 20, 5 * MIN)) return json(res, 429, { error: 'rate' });
     const returnTo = safeReturn(url.searchParams.get('return'));
     const link = url.searchParams.get('link') === '1' ? sessionUser(req) : null;
     if (url.searchParams.get('link') === '1' && !link) return fail(res, returnTo, 'no_session', 401);
     const state = randomId(24);
     const verifier = randomId(48);
     const nonce = randomId(12);
+    // nonce протокола OIDC — отдельная величина: она уходит провайдеру и возвращается внутри id_token
+    const oidcNonce = p.kind === 'oidc' ? randomId(16) : '';
     const anon = link ? '' : (sessionUser(req) || claimedAnon(url.searchParams) || '');
-    putCookie(res, 'aura_oauth', sign({ p: provider, s: state, v: verifier, r: returnTo, l: link || '', a: anon, n: nonce, t: Date.now() }), {
+    putCookie(res, 'aura_oauth', sign({ p: provider, s: state, v: verifier, r: returnTo, l: link || '', a: anon, n: nonce, o: oidcNonce, t: Date.now() }), {
       maxAgeSec: OAUTH_TTL_MS / 1000, path: '/auth',
     });
     const to = new URL(p.authorizeUrl);
@@ -264,14 +307,16 @@ export function createWebAuth({ db, cfg, env = process.env, makeSession, checkSe
     to.searchParams.set('code_challenge', s256(verifier));
     to.searchParams.set('code_challenge_method', 'S256');
     if (p.scope) to.searchParams.set('scope', p.scope);
+    if (oidcNonce) to.searchParams.set('nonce', oidcNonce);
+    for (const [k, v] of Object.entries(p.authParams || {})) to.searchParams.set(k, v);
     db.event('web_login_start', link || '', 0, provider);
     return redirect(res, to.href);
   }
 
   async function onCallback(req, res, url, provider) {
     const p = providers[provider];
-    if (!p || p.kind !== 'oauth2') return json(res, 404, { error: 'provider' });
-    if (!rateOk(req, 30, 5 * MIN)) return json(res, 429, { error: 'rate' });
+    if (!redirectKind(p)) return json(res, 404, { error: 'provider' });
+    if (!rateOk(req, 'callback', 40, 5 * MIN)) return json(res, 429, { error: 'rate' });
     const st = unsign(parseCookies(req.headers.cookie).aura_oauth);
     dropCookie(res, 'aura_oauth', '/auth');
     const returnTo = safeReturn(st?.r);
@@ -280,15 +325,28 @@ export function createWebAuth({ db, cfg, env = process.env, makeSession, checkSe
     if (given.length !== st.s.length || !crypto.timingSafeEqual(Buffer.from(given), Buffer.from(st.s))) return fail(res, returnTo, 'state');
     if (usedStates.has(st.n)) return fail(res, returnTo, 'state_used');
     usedStates.set(st.n, Date.now() + OAUTH_TTL_MS);
-    if (url.searchParams.get('error')) return fail(res, returnTo, 'provider_denied');
+    // Человек нажал «Отмена» у провайдера — это не ошибка, и экран должен звучать иначе
+    const denied = String(url.searchParams.get('error') || '');
+    if (denied) {
+      const soft = denied === 'access_denied' || denied === 'user_cancelled_authorize' || denied === 'consent_required';
+      return fail(res, returnTo, soft ? 'provider_denied' : 'provider_error', soft ? 400 : 502);
+    }
     const code = String(url.searchParams.get('code') || '');
     if (!code) return fail(res, returnTo, 'no_code');
 
     let profile;
     try {
       const tok = await exchange(p, code, st.v, callbackUrl(req, provider));
-      if (!tok?.access_token) throw new Error('no_token');
-      profile = await userinfo(p, tok.access_token);
+      if (p.kind === 'oidc') {
+        if (!tok?.id_token) throw new Error('no_id_token');
+        const claims = await verifyIdToken(tok.id_token, {
+          jwks: jwksFor(p), audience: p.clientId, issuers: p.issuers, nonce: st.o || '',
+        });
+        profile = profileFrom(claims);
+      } else {
+        if (!tok?.access_token) throw new Error('no_token');
+        profile = await userinfo(p, tok.access_token);
+      }
     } catch (e) {
       console.error('auth callback:', provider, e.message);
       return fail(res, returnTo, 'provider_error', 502);
@@ -301,7 +359,7 @@ export function createWebAuth({ db, cfg, env = process.env, makeSession, checkSe
 
   async function onTelegram(req, res, url) {
     if (!providers.telegram) return json(res, 404, { error: 'provider' });
-    if (!rateOk(req, 30, 5 * MIN)) return json(res, 429, { error: 'rate' });
+    if (!rateOk(req, 'callback', 40, 5 * MIN)) return json(res, 429, { error: 'rate' });
     let fields;
     try { fields = await readFields(req, url); } catch { return json(res, 413, { error: 'big' }); }
     const returnTo = safeReturn(fields.get('return') || url.searchParams.get('return'));

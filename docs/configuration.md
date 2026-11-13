@@ -65,11 +65,17 @@
 | Переменная | По умолчанию | Описание |
 |---|---|---|
 | `WEB_ANON` | — | `1` — браузер без Telegram получает анонимный профиль `web-*` и сессию на 30 дней (HOM-31) |
-| `AUTH_PROVIDERS` | — | Включённые способы входа через запятую, например `telegram`. **Пусто — вход на сайте выключен целиком: `/auth/*` отдаёт 404, cookie не выдаются, кнопок входа в интерфейсе нет.** Провайдер, у которого ещё нет ветки в коде, молча игнорируется |
+| `AUTH_PROVIDERS` | — | Включённые способы входа через запятую, например `telegram,google`. **Пусто — вход на сайте выключен целиком: `/auth/*` отдаёт 404, cookie не выдаются, кнопок входа в интерфейсе нет.** Провайдер, у которого ещё нет ветки в коде, молча игнорируется |
+| `GOOGLE_CLIENT_ID` | — | OAuth 2.0 Client ID (Web application) для входа через Google. Без него и секрета `google` в `AUTH_PROVIDERS` молча не включается |
+| `GOOGLE_CLIENT_SECRET` 🔒 | — | Client secret того же Client ID. Уходит только в server-to-server запрос на `/token`, в редирект к Google не попадает |
 | `AUTH_COOKIE_INSECURE` | — | `1` — не ставить флаг `Secure` на cookie (только локальный `http://`; в проде не включать) |
 | `SESSION_SALT` 🔒 | — | Дополнительная соль подписи cookie `aura_oauth`; смена инвалидирует незавершённые входы |
 
 Для Telegram Login Widget нужен `/setdomain` у @BotFather (домен сайта) и `BOT_USERNAME`.
+Для Google — redirect URI `https://<домен>/auth/google/callback` и скоупы `openid email profile`
+в Cloud Console; адреса эндпоинтов и JWKS зашиты в коде. Внутри Telegram Mini App кнопок соцсетей
+нет вовсе: Google отвечает `disallowed_useragent` во встроенных WebView, а вход там есть через `initData`.
+Порядок настройки — в [operations.md](operations.md#google-oidc).
 Cookie `aura_session` — `HttpOnly; Secure; SameSite=Lax; Max-Age=30d` с тем же HMAC-токеном, что и прежние
 сессии: при включении флага живые пользователи не разлогиниваются. На Cloudflare для `/auth/*` нужна
 cache rule bypass, иначе `Set-Cookie` и редиректы могут закэшироваться.

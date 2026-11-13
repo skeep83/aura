@@ -109,6 +109,22 @@ conn FAIL timeout local=host,srflx remote=srflx turn=false
 5. Включать провайдеров по одному: `AUTH_PROVIDERS=telegram`, перезапуск api, живая проверка входа, затем следующий.
 6. Откат — вернуть `AUTH_PROVIDERS=` и перезапустить api: новые cookie перестают выдаваться, профили и привязки остаются в базе.
 
+### Google (OIDC)
+
+Разовая настройка на стороне Google Cloud Console, до включения `AUTH_PROVIDERS=…,google`:
+
+1. OAuth 2.0 Client ID типа **Web application**. Authorized redirect URI — ровно `https://aura-life.online/auth/google/callback`; лишний слэш или `http` Google не примет.
+2. Скоупы — `openid email profile`. Это неконфиденциальные скоупы: верификация приложения и ежегодный аудит для них не нужны.
+3. Consent screen: логотип, домашняя страница и ссылки на `/privacy` и `/terms` — иначе на внешнем типе приложения экран остаётся в тестовом режиме и пускает только добавленных вручную людей.
+4. `GOOGLE_CLIENT_ID` и `GOOGLE_CLIENT_SECRET` — в окружение api (секрет не коммитить и не вставлять в задачи). Адреса эндпоинтов Google зашиты в коде, задавать их не нужно.
+5. Проверка на проде: вход в обычном браузере на десктопе и в Chrome на Android, повторный вход тем же аккаунтом ведёт в тот же профиль.
+
+Особенности, из которых растут решения в коде:
+
+- **Внутри Telegram Mini App кнопок соцсетей нет вовсе.** Google отвечает `disallowed_useragent` на OAuth во встроенных WebView, а в мини-аппе вход и так есть через `initData`.
+- Ключи подписи `id_token` Google ротирует. JWKS кэшируется по его `Cache-Control`, а неизвестный `kid` вызывает не больше одного перечитывания в минуту — чужой мусорный токен не превращается в рычаг на эндпоинт Google.
+- `client_secret` уходит только в server-to-server запрос на `/token`; в редиректе к Google его нет.
+
 ## Модерация: разбор инцидентов
 
 - Логи api: `nsfw <id> score=… strikes=…`, `age block <id> minor=…`, `report <a> -> <b> (reason)`.
