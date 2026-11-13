@@ -418,10 +418,12 @@ const admin = createAdmin({
   notify: (id, text) => bot?.notify(id, text),
 });
 
-// Откуда пришёл пользователь: рекламная кампания (ad_<код>), комната канала, приглашение, Duo
-function sourceOf(sp, room) {
+// Откуда пришёл пользователь: рекламная кампания (ad_<код>), комната канала, приглашение, Duo.
+// HOM-36: токены единого реестра (бот и веб ?src=) пишутся в source как есть — один токен = один источник.
+function sourceOf(sp, room, resolvedToken = '') {
   if (/^ad_[\w-]{1,40}$/.test(sp)) return `ad:${sp.slice(3)}`;
   if (/^src_[\w-]{1,40}$/.test(sp)) return `src:${sp.slice(4)}`;
+  if (resolvedToken) return resolvedToken.slice(0, 64);
   if (sp.startsWith('room_')) return `room:${room || '?'}`;
   if (sp.startsWith('ref_')) return 'ref';
   if (sp.startsWith('inv_')) return 'invite';
@@ -777,6 +779,13 @@ wss.on('connection', (ws, req) => {
     if (!user) return ws.close(4003, 'bad initData');
     clearTimeout(authTimer);
 
+    // HOM-36: веб-параметры источника и реферала (переживают онбординг и гейт 18+ — клиент
+    // хранит их в localStorage и присылает при каждом auth; первое касание не перезаписывается
+    // ни здесь, ни в БД: setSource и firstTouch пишут только пустые/NULL значения).
+    const cleanTok = v => (/^[A-Za-z0-9_-]{1,64}$/.test(String(v || '')) ? String(v) : '');
+    const webSrc = cleanTok(msg.webSrc), webRef = cleanTok(msg.webRef).slice(0, 40);
+    if (!user.startParam && webSrc) user.startParam = webSrc; // подписанный start_param Telegram важнее; веб-токен — когда своего нет
+
     const isNew = !db.exists(user.id);
     const until = db.bannedUntil(user.id);
     if (until) { send({ t: 'banned', until }); return ws.close(4004, 'banned'); }
@@ -784,9 +793,11 @@ wss.on('connection', (ws, req) => {
     if (!user.web) db.touch(user.id, user); else db.touch(user.id, { ...user, lang: user.lang });
     const sp = user.startParam || '';
     let referred = false;
-    // Реферал: ссылка ref_<код> или приглашение inv_<код> — новичку и другу по суткам Premium
-    if (isNew && (sp.startsWith('ref_') || sp.startsWith('inv_'))) {
-      const refId = db.resolveRef(sp.slice(4));
+    // Реферал: ссылка ref_<код> или приглашение inv_<код> — новичку и другу по суткам Premium.
+    // HOM-36: веб-параметр ?ref=<код> — тот же ref_code и та же механика, что в боте.
+    const refBase = sp.startsWith('ref_') || sp.startsWith('inv_') ? sp.slice(4) : (webRef || '');
+    if (isNew && refBase) {
+      const refId = db.resolveRef(refBase);
       referred = db.applyReferral(user.id, refId, { days: cfg.referralDays });
       if (referred) {
         const ref = clients.get(refId);
@@ -854,14 +865,19 @@ wss.on('connection', (ws, req) => {
         db.event('invite_miss', user.id);
       }
     }
-    const source = sourceOf(sp, room);
-    if (isNew) db.setSource(client.id, source);
     // Аналитика v1: валидированное открытие, first touch, invite_open, return_d1/d7 (спека aura-analytics-spec)
-    client.sessionId = analytics.onValidatedOpen({
+    const opened = analytics.onValidatedOpen({
       // Подписанный start_param доверяем; в dev-режиме — тестовый из msg; в web-сессии несогласованный tgWebAppStartParam атрибуцию не меняет
-      userId: client.id, startParam: validatedKind === 'initdata' || cfg.devAnon || validatedKind === 'web_anon' ? sp : '', kind: validatedKind,
+      userId: client.id, startParam: validatedKind === 'initdata' || cfg.devAnon || validatedKind === 'web_anon' ? sp : '',
+      refCode: validatedKind === 'initdata' ? '' : webRef,
+      kind: validatedKind,
       platform: normalizePlatform(msg.platform),
-    }).sessionId;
+    });
+    client.sessionId = opened.sessionId;
+    // HOM-36: source = токен из единого реестра (или старый префиксный разбор); органика — unknown,
+    // не выдуманный канал. setSource не перезаписывает непустое — первое касание защищено на уровне БД.
+    const source = sourceOf(sp, room, opened.resolution?.token || '');
+    if (isNew) db.setSource(client.id, source === 'direct' ? 'unknown' : source);
     db.event('session', client.id, 0, source === 'direct' ? '' : source);
     const ice = await iceServers(user.id);
     const pocket = threads.holding(client.id);

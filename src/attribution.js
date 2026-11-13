@@ -38,9 +38,41 @@ const LEGACY_ALIASES = [
   ['src_video', 'short_video', 'organic_video'], ['src_cross', 'cross_promo_legacy', 'cross_promo'],
 ];
 
+// HOM-36: схема токенов для живых листингов — dir_<slug> и yt_/tt_<номер> принимаются
+// без правки реестра (Growth дописывает ?src= к уже опубликованным ссылкам).
+// Смысл существующего токена неизменен; новые токены схемы регистрируются при первом попадании.
+const WEB_SCHEME_RES = [
+  /^dir_([a-z0-9][a-z0-9-]{0,38}[a-z0-9])$/,
+  /^(?:tt|yt)_(?:[1-9]|[1-9][0-9])$/,
+];
+export function isSchemeToken(t) { return TOKEN_RE.test(t) && WEB_SCHEME_RES.some(r => r.test(t)); }
+export function schemeAttribution(token) {
+  if (token.startsWith('dir_')) {
+    const source = token.slice(4).replaceAll('-', '_');
+    return { utm_source: source, utm_medium: 'directory', utm_campaign: CAMPAIGN, utm_content: token, placement_id: token, creative_id: 'listing_main' };
+  }
+  const short = token.startsWith('tt');
+  return {
+    utm_source: short ? 'tiktok' : 'youtube_shorts', utm_medium: 'organic_video', utm_campaign: CAMPAIGN,
+    utm_content: token, placement_id: token, creative_id: `video_${token.slice(3).padStart(2, '0')}`,
+  };
+}
+
+// Первая волна веб-каналов (HOM-36). Тот же реестр, что и у бота: один токен = один источник.
+const WEB_TOKENS = [
+  ['seo_ru', 'organic_search', 'organic_search_ru'], ['seo_en', 'organic_search', 'organic_search_en'],
+  ['seo_es', 'organic_search', 'organic_search_es'], ['seo_tr', 'organic_search', 'organic_search_tr'],
+  ['seo_uk', 'organic_search', 'organic_search_uk'], ['seo_id', 'organic_search', 'organic_search_id'],
+  ['blog_cta', 'aura_blog', 'blog_cta'], ['share_story', 'share', 'share_story'],
+  ['invite_link', 'invite', 'invite_link'], ['qr', 'qr', 'qr'], ['pwa', 'pwa', 'pwa_install'],
+];
+
 // Полный статический реестр: токен → атрибуция. referrer_id у статических токенов всегда NULL.
 export function staticRegistry() {
   const rows = STATIC_TOKENS.map(t => ({ ...t, utm_campaign: CAMPAIGN, utm_content: t.placement_id, referrer_id: null, legacy: 0 }));
+  for (const [token, source, content] of WEB_TOKENS) {
+    rows.push({ token, utm_source: source, utm_medium: source === 'organic_search' ? 'organic_search' : source, utm_campaign: CAMPAIGN, utm_content: content, placement_id: token, creative_id: null, referrer_id: null, legacy: 0 });
+  }
   for (const [token, source, medium] of LEGACY_ALIASES) {
     rows.push({ token, utm_source: source, utm_medium: medium, utm_campaign: CAMPAIGN, utm_content: token, placement_id: token, creative_id: null, referrer_id: null, legacy: 1 });
   }
@@ -53,10 +85,16 @@ const TOKEN_RE = /^[A-Za-z0-9_-]{1,64}$/;
 // Возвращает null (не наш токен — счётчик invalid_start_token) или
 // { token, utm..., referrerId (внутренний id пригласившего), kind: 'registry'|'referral'|'legacy' }.
 // referralResolver(base) → внутренний id пользователя или null (r1_<base36>, legacy ref_/inv_).
-export function resolveStartParam(sp, registryRows, referralResolver) {
+export function resolveStartParam(sp, registry, referralResolver) {
   if (!sp || !TOKEN_RE.test(sp)) return null;
-  const row = registryRows.get(sp);
+  const row = registry.get(sp);
   if (row) return { token: sp, kind: row.legacy ? 'legacy' : 'registry', referrerId: null, utm: row };
+  // HOM-36: токены схемы (dir_*, yt_/tt_<NN>) и test_* — валидны без явной регистрации;
+  // вызывающий может добавить их в attribution_tokens (registerSchemeToken) при первом попадании.
+  if (isSchemeToken(sp)) return { token: sp, kind: 'scheme', referrerId: null, utm: schemeAttribution(sp) };
+  if (/^test_[A-Za-z0-9_-]{1,59}$/.test(sp)) {
+    return { token: sp, kind: 'test', referrerId: null, utm: { utm_source: sp, utm_medium: 'test', utm_campaign: CAMPAIGN, utm_content: sp, placement_id: sp, creative_id: null } };
+  }
   const m = /^r1_([a-z0-9]{1,13})$/.exec(sp);
   if (m) {
     const n = Number.parseInt(m[1], 36);

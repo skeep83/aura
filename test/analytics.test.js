@@ -245,3 +245,67 @@ test('HOM-31: веб-аноним (kind=web_anon) не тестовый и по�
   const row = db.db.prepare("SELECT is_test FROM users WHERE id='web-abc123'").get();
   assert.equal(Number(row.is_test), 0);
 });
+
+// ---------- HOM-36: веб-атрибуция ?src= / ?ref= ----------
+
+test('HOM-36: веб-токены первой волны в реестре; dir_/yt_/tt_ — по схеме без правки реестра', () => {
+  const resolver = k => (k === 'code42' ? '42' : null);
+  const reg = new Map(staticRegistry().map(r => [r.token, r]));
+  for (const t of ['seo_ru', 'seo_en', 'seo_es', 'seo_tr', 'seo_uk', 'seo_id', 'blog_cta', 'share_story', 'invite_link', 'qr', 'pwa']) {
+    const r = resolveStartParam(t, reg, resolver);
+    assert.ok(r, t);
+    assert.ok(r.utm.utm_source, t);
+  }
+  // dir_<любой slug> — валиден без регистрации (живые листинги Growth правит только по URL)
+  const dir = resolveStartParam('dir_newcatalog-2', reg, resolver);
+  assert.equal(dir.kind, 'scheme');
+  assert.equal(dir.utm.utm_medium, 'directory');
+  assert.equal(dir.utm.utm_source, 'newcatalog_2');
+  assert.equal(resolveStartParam('yt_13', reg, resolver).utm.utm_source, 'youtube_shorts');
+  assert.equal(resolveStartParam('tt_7', reg, resolver).utm.utm_source, 'tiktok');
+  assert.equal(resolveStartParam('yt_100', reg, resolver), null);   // вне схемы (1-99)
+  assert.equal(resolveStartParam('dir_', reg, resolver), null);     // пустой slug
+  assert.equal(resolveStartParam('test_manual', reg, resolver).kind, 'test');
+});
+
+test('HOM-36: ?src= фиксирует first touch, регистрирует схемный токен, первое касание не перезаписывается', () => {
+  const db = memDb(); const a = mk(db);
+  const u = 'web-src-1';
+  a.onValidatedOpen({ userId: u, startParam: 'dir_newcatalog-2', kind: 'web_anon', at: T0, platform: 'web' });
+  let row = db.user(u);
+  assert.equal(row.first_touch_token, 'dir_newcatalog-2');
+  assert.equal(row.utm_source, 'newcatalog_2');
+  // токен схемы попал в attribution_tokens (переживёт рестарт, уйдёт в tokens.csv)
+  assert.ok(db.db.prepare("SELECT 1 FROM attribution_tokens WHERE token='dir_newcatalog-2'").get());
+  // повторное открытие с другим токеном — не перезаписывает (правило первого касания)
+  a.onValidatedOpen({ userId: u, startParam: 'blog_cta', kind: 'web_anon', at: T0 + 1000, platform: 'web' });
+  assert.equal(db.user(u).first_touch_token, 'dir_newcatalog-2');
+  // событие mini_app_open carries entry_token
+  const ev = db.db.prepare("SELECT properties_json FROM events_v2 WHERE event_name='mini_app_open' AND user_id=? AND properties_json LIKE '%dir_newcatalog-2%'").get(u);
+  assert.match(ev.properties_json, /"entry_token":"dir_newcatalog-2"/);
+});
+
+test('HOM-36: ?ref=<код> привязывает пригласившего; src+ref вместе — utm из src, referrer из ref', () => {
+  const db = memDb(); const a = mk(db);
+  db.touch('9001', { id: '9001' });
+  const code = db.refCode('9001');
+  a.onValidatedOpen({ userId: 'web-ref-1', refCode: code, kind: 'web_anon', at: T0, platform: 'web' });
+  let row = db.user('web-ref-1');
+  assert.equal(row.referrer_id, '9001');
+  assert.equal(row.utm_source, 'referral');
+  assert.ok(db.db.prepare("SELECT 1 FROM referrals WHERE invitee_user_id='web-ref-1' AND referrer_id='9001'").get());
+  // комбинация: источник из src, пригласивший из ref
+  a.onValidatedOpen({ userId: 'web-ref-2', startParam: 'blog_cta', refCode: code, kind: 'web_anon', at: T0, platform: 'web' });
+  row = db.user('web-ref-2');
+  assert.equal(row.first_touch_token, 'blog_cta');
+  assert.equal(row.utm_source, 'aura_blog');
+  assert.equal(row.referrer_id, '9001');
+  // несуществующий ref — не ломает атрибуцию источника
+  a.onValidatedOpen({ userId: 'web-ref-3', startParam: 'qr', refCode: 'nope', kind: 'web_anon', at: T0, platform: 'web' });
+  row = db.user('web-ref-3');
+  assert.equal(row.first_touch_token, 'qr');
+  assert.equal(row.referrer_id, null);
+  // self-ref — не источник
+  a.onValidatedOpen({ userId: '9001', refCode: code, kind: 'web_anon', at: T0, platform: 'web' });
+  assert.equal(db.user('9001').referrer_id, null);
+});

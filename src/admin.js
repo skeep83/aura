@@ -31,6 +31,7 @@ export function createAdmin({ db, ai, jev, threads = null, appLink = () => '', b
     bannedUntil: u.banned_until, banReason: u.ban_reason, strikes: u.strikes,
     aura: auraOf(u), karmaUp: u.karma_up, karmaDown: u.karma_down, streak: u.streak,
     referrals: u.referrals, referredBy: u.referred_by, salutes: u.salutes, salutesReceived: u.salutes_received,
+    source: u.source, firstTouchToken: u.first_touch_token || null, utmSource: u.utm_source || 'unknown',
     reveal: Boolean(u.reveal), pair: Boolean(u.pair), exchange: u.ex_native ? { native: u.ex_native, learn: u.ex_learn } : null, allowsPm: Boolean(u.allows_pm), online: isOnline(u.id),
     reports: get('SELECT COUNT(*) AS n FROM reports WHERE target = ?', u.id).n,
   });

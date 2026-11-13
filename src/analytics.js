@@ -16,7 +16,7 @@
 // - dev-пользователи (DEV_ALLOW_ANON, тесты) получают is_test=1 автоматически.
 import crypto from 'node:crypto';
 import fs from 'node:fs';
-import { staticRegistry, resolveStartParam, referralAttribution, REGISTRY_REVISION, CAMPAIGN } from './attribution.js';
+import { staticRegistry, resolveStartParam, isSchemeToken, referralAttribution, REGISTRY_REVISION, CAMPAIGN } from './attribution.js';
 
 const DAY = 24 * 60 * 60 * 1000;
 const iso = ms => new Date(ms).toISOString().replace(/(\.\d{3})Z$/, '$1Z');
@@ -118,12 +118,21 @@ export function createAnalytics({ db, env = process.env, now = () => Date.now() 
 
   // Реестр: статика из кода (versioned) + постоянные строки в БД для выгрузки.
   const registry = new Map();
+  const insToken = d.prepare('INSERT OR IGNORE INTO attribution_tokens (token,utm_source,utm_medium,utm_campaign,utm_content,placement_id,creative_id,referrer_id,legacy,created_at_utc) VALUES (?,?,?,?,?,?,?,?,?,?)');
+  function registerToken(r) {
+    // HOM-36: токены схемы (dir_<каталог>, yt_/tt_<NN>) и generic-токены веба
+    // регистрируются при первом попадании — Growth правит только URL, не реестр.
+    if (registry.has(r.token)) return;
+    registry.set(r.token, r);
+    insToken.run(r.token, r.utm_source, r.utm_medium, r.utm_campaign, r.utm_content, r.placement_id, r.creative_id, r.referrer_id, r.legacy ?? 0, iso(now()));
+  }
   {
-    const ins = d.prepare('INSERT OR IGNORE INTO attribution_tokens (token,utm_source,utm_medium,utm_campaign,utm_content,placement_id,creative_id,referrer_id,legacy,created_at_utc) VALUES (?,?,?,?,?,?,?,?,?,?)');
     for (const r of staticRegistry()) {
       registry.set(r.token, r);
-      ins.run(r.token, r.utm_source, r.utm_medium, r.utm_campaign, r.utm_content, r.placement_id, r.creative_id, r.referrer_id, r.legacy, iso(now()));
+      insToken.run(r.token, r.utm_source, r.utm_medium, r.utm_campaign, r.utm_content, r.placement_id, r.creative_id, r.referrer_id, r.legacy, iso(now()));
     }
+    // Ранее зарегистрированные динамические токены переживают рестарт
+    for (const r of d.prepare('SELECT * FROM attribution_tokens').all()) if (!registry.has(r.token)) registry.set(r.token, r);
   }
 
   const tx = fn => { d.exec('BEGIN IMMEDIATE'); try { const r = fn(); d.exec('COMMIT'); return r; } catch (e) { d.exec('ROLLBACK'); throw e; } };
@@ -191,7 +200,7 @@ export function createAnalytics({ db, env = process.env, now = () => Date.now() 
   // kind: 'initdata' (подпись Telegram проверена) | 'session' (наша подписанная сессия)
   // | 'web_anon' (анонимный браузерный вход, HOM-31 — не смешивать с Telegram-когортами)
   // Возвращает { sessionId, token, resolution } — attrs для последующих событий этой сессии.
-  function onValidatedOpen({ userId, startParam = '', kind, at = now(), platform = 'unknown', appVersion = APP_VERSION }) {
+  function onValidatedOpen({ userId, startParam = '', refCode = '', kind, at = now(), platform = 'unknown', appVersion = APP_VERSION }) {
     db.user(userId, at);
     if (isTest(userId)) stmt.touch.run(1, userId);
     const sessionId = crypto.randomUUID();
@@ -201,6 +210,17 @@ export function createAnalytics({ db, env = process.env, now = () => Date.now() 
       resolution = resolveStartParam(String(startParam).slice(0, 64), registry, referralResolver);
       if (!resolution) insertEvent({ eventName: 'invalid_start_token', userId, sessionId, at, platform, props: { token_format_ok: /^[A-Za-z0-9_-]{1,64}$/.test(startParam) ? 1 : 0 } });
     }
+    // HOM-36: веб-реферал ?ref=<код> — тот же ref_code, что у бота (ref_<код>).
+    // Токен источника и пригласивший совместимы: src даёт utm, ref — referrerId.
+    if (refCode) {
+      const referrerId = referralResolver(String(refCode).slice(0, 40));
+      if (referrerId && referrerId !== userId) {
+        if (!resolution) resolution = { token: `ref_${String(refCode).slice(0, 40)}`, kind: 'referral', referrerId, utm: referralAttribution(referrerId) };
+        else if (!resolution.referrerId) resolution = { ...resolution, referrerId };
+      }
+    }
+    // Токены схемы и generic-токены веба регистрируются при первом попадании
+    if (resolution && (resolution.kind === 'scheme' || resolution.kind === 'test')) registerToken({ ...resolution.utm, token: resolution.token, referrer_id: null, legacy: 0 });
     if (resolution && resolution.referrerId === userId) resolution = null; // self-invite не источник
     tx(() => {
       if (resolution) {
@@ -215,8 +235,9 @@ export function createAnalytics({ db, env = process.env, now = () => Date.now() 
     insertEvent({ eventName: kind === 'initdata' ? 'init_validated' : 'mini_app_open', userId, sessionId, at, attrs, platform, props: { auth_date: Math.floor(at / 1000), auth_kind: kind } });
     insertEvent({ eventName: 'mini_app_open', userId, sessionId, at, attrs, platform, props: { entry_token: entryToken, open_id: crypto.randomUUID() } });
     insertEvent({ eventName: 'session', userId, sessionId, at, attrs, platform });
-    // Реферальный кандидат закрепляется при первом валидном реферальном открытии (до активации)
-    if (resolution?.kind === 'referral' && resolution.referrerId && resolution.referrerId !== userId) {
+    // Реферальный кандидат закрепляется при первом валидном реферальном открытии (до активации).
+    // HOM-36: referrerId может прийти и с токеном источника (?src=...&ref=...) — проверяем его, а не kind.
+    if (resolution?.referrerId && resolution.referrerId !== userId) {
       tx(() => {
         // повторное открытие не создаёт новую кандидатуру и не дублирует invite_open
         if (stmt.refCandidate.run(userId, resolution.referrerId, resolution.token, at).changes > 0) {

@@ -3,7 +3,7 @@
   "short_name": "Aura",
   "description": "Видеочат со случайными людьми со всего мира. Один свайп — новый собеседник. Прямо в Telegram.",
   "id": "https://aura-life.online/",
-  "start_url": "/",
+  "start_url": "/?src=pwa",
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait",

@@ -36,6 +36,38 @@ const db = new Db(snap);
 const analytics = createAnalytics({ db, env: { APP_VERSION: process.env.APP_VERSION || 'export' } });
 const d = db.db;
 
+// HOM-36: псевдонимизация user_id. Сырые id остаются на VPS, в архив идёт
+// стабильный HMAC с серверной солью (стабильный — сверки по дням и когорты не ломаются).
+// Соль создаётся при первом прогоне и лежит в DATA_DIR/export.salt (вне архива).
+const SALT_FILE = path.join(DATA_DIR, 'export.salt');
+const idSalt = (() => {
+  const envSalt = String(process.env.EXPORT_ID_SALT || '');
+  if (envSalt) return envSalt;
+  try { return fs.readFileSync(SALT_FILE, 'utf8').trim(); } catch {}
+  const s = crypto.randomBytes(32).toString('hex');
+  try { fs.writeFileSync(SALT_FILE, s + '\n', { mode: 0o600 }); } catch {}
+  return s;
+})();
+const PSEUDO_VERSION = 'v1';
+const pseudo = id => (id == null || id === '' || id === '0')
+  ? String(id ?? '')
+  : `u_${PSEUDO_VERSION}_${crypto.createHmac('sha256', idSalt).update(String(id)).digest('hex').slice(0, 24)}`;
+const saltKeyId = crypto.createHash('sha256').update(idSalt).digest('hex').slice(0, 8);
+// В properties_json тоже встречаются id (invite_open, referred_first_useful_action) —
+// хешируем известные поля, не трогая остальные.
+const USER_ID_PROPS = ['referrer_id', 'invitee_user_id'];
+// В utm-полях реферальных касаний placement_id несёт ref_<tg id> — чистим и там.
+const scrub = s => String(s ?? '').replace(/ref_(\d{5,})/g, (_, id) => 'ref_' + pseudo(id));
+const pseudoProps = j => {
+  if (!j) return '';
+  try {
+    const o = JSON.parse(j);
+    for (const k of USER_ID_PROPS) if (o[k] != null && o[k] !== '') o[k] = pseudo(o[k]);
+    if (typeof o.invite_token === 'string') o.invite_token = scrub(o.invite_token); // legacy ref_<tg id>
+    return JSON.stringify(o);
+  } catch { return String(j); }
+};
+
 const csvEscape = v => {
   if (v === null || v === undefined) return '';
   const s = String(v);
@@ -50,12 +82,12 @@ const codeVersion = (() => { try { return execFileSync('git', ['rev-parse', '--s
 
 // users.csv
 const users = d.prepare('SELECT * FROM users').all().map(u => ({
-  user_id: u.id, created_at_utc: new Date(u.created_at).toISOString(),
+  user_id: pseudo(u.id), created_at_utc: new Date(u.created_at).toISOString(),
   first_validated_at_utc: u.first_validated_at ? new Date(u.first_validated_at).toISOString() : null,
   first_activation_at_utc: u.first_activation_at ? new Date(u.first_activation_at).toISOString() : null,
   first_touch_confirmed_at_utc: u.first_touch_confirmed_at ? new Date(u.first_touch_confirmed_at).toISOString() : null,
   first_touch_token: u.first_touch_token, utm_source: u.utm_source || 'unknown', utm_medium: u.utm_medium, utm_campaign: u.utm_campaign,
-  utm_content: u.utm_content, placement_id: u.placement_id, creative_id: u.creative_id, referrer_id: u.referrer_id,
+  utm_content: scrub(u.utm_content), placement_id: scrub(u.placement_id), creative_id: u.creative_id, referrer_id: pseudo(u.referrer_id),
   legacy_source_raw: u.source, onboarding_completed_at_utc: u.onboarding_completed_at ? new Date(u.onboarding_completed_at).toISOString() : null,
   is_test: u.is_test || 0,
 }));
@@ -63,17 +95,20 @@ const users = d.prepare('SELECT * FROM users').all().map(u => ({
 // events.csv (все события v1 за сутки D; поздние исправления приходят в архив своей даты)
 const ev2cols = ['event_id', 'event_name', 'occurred_at_utc', 'ingested_at_utc', 'user_id', 'session_id', 'utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'placement_id', 'creative_id', 'referrer_id', 'app_version', 'platform', 'event_schema_version', 'is_test', 'call_id', 'duration_ms', 'threshold_at_utc', 'payment_id', 'snapshot_minute_utc', 'searching_users', 'properties_json'];
 const events = d.prepare('SELECT * FROM events_v2 WHERE occurred_at_utc >= ? AND occurred_at_utc < ? ORDER BY occurred_at_utc').all(from, new Date(dayEnd).toISOString())
-  .map(e => Object.fromEntries(ev2cols.map(c => [c, e[c] ?? ''])));
+  .map(e => Object.fromEntries(ev2cols.map(c => [c,
+    c === 'user_id' || c === 'referrer_id' ? pseudo(e[c])
+      : c === 'properties_json' ? pseudoProps(e[c])
+      : c === 'utm_content' || c === 'placement_id' ? scrub(e[c]) : (e[c] ?? '')])));
 
 // legacy_events.csv — старые события (schema v0), чтобы OpenAI не смешивал методики
 const legacy = d.prepare('SELECT * FROM events WHERE at >= ? AND at < ? ORDER BY at').all(dayStart, dayEnd)
-  .map(e => ({ event_id: `legacy:${e.at}:${e.type}:${e.user_id}`, event_name: e.type, occurred_at_utc: new Date(e.at).toISOString(), user_id: e.user_id, value: e.value, tag: e.tag, event_schema_version: 0 }));
+  .map(e => ({ event_id: `legacy:${e.at}:${e.type}:${pseudo(e.user_id)}`, event_name: e.type, occurred_at_utc: new Date(e.at).toISOString(), user_id: pseudo(e.user_id), value: e.value, tag: e.tag, event_schema_version: 0 }));
 
 // calls.csv
 const calls = d.prepare('SELECT * FROM calls WHERE ended_at IS NOT NULL AND ended_at >= ? AND ended_at < ?').all(dayStart, dayEnd).map(c => {
   const iso = ms => ms == null ? '' : new Date(ms).toISOString();
   return {
-    call_id: c.call_id, user_id: c.user_a, partner_user_id: c.user_b, session_id: c.session_a,
+    call_id: c.call_id, user_id: pseudo(c.user_a), partner_user_id: pseudo(c.user_b), session_id: c.session_a,
     conn_ok_at_utc: iso(c.conn_ok_at), talk_started_at_utc: iso(c.talk_started_at), call_ended_at_utc: iso(c.ended_at),
     duration_ms: c.duration_ms ?? '', end_reason: c.end_reason || '', clock_fallback: c.clock_fallback,
     verification_status: c.verified ? 'verified' : 'duration_unknown',
@@ -83,7 +118,7 @@ const calls = d.prepare('SELECT * FROM calls WHERE ended_at IS NOT NULL AND ende
 
 // payments.csv
 const payments = d.prepare('SELECT * FROM payments WHERE at >= ? AND at < ?').all(dayStart, dayEnd).map(p => ({
-  payment_id: p.charge_id, user_id: p.user_id, occurred_at_utc: new Date(p.at).toISOString(),
+  payment_id: p.charge_id, user_id: pseudo(p.user_id), occurred_at_utc: new Date(p.at).toISOString(),
   status: p.refunded ? 'refunded' : 'success', amount_minor: p.stars, currency: 'XTR', provider: 'telegram_stars',
   is_test: (db.user(p.user_id).is_test || 0),
 }));
@@ -92,7 +127,7 @@ const payments = d.prepare('SELECT * FROM payments WHERE at >= ? AND at < ?').al
 const tokens = d.prepare('SELECT * FROM attribution_tokens ORDER BY token').all().map(t => ({
   token: t.token, canonical_token: t.token, utm_source: t.utm_source, utm_medium: t.utm_medium, utm_campaign: t.utm_campaign,
   utm_content: t.utm_content || '', placement_id: t.placement_id || '', creative_id: t.creative_id || '',
-  referrer_id: t.referrer_id || '', active: 1, created_at_utc: t.created_at_utc, registry_revision: 'v1',
+  referrer_id: pseudo(t.referrer_id), active: 1, created_at_utc: t.created_at_utc, registry_revision: 'v1',
 }));
 
 // daily_totals.csv / daily_sources.csv — контрольный серверный SQL
@@ -149,7 +184,9 @@ const manifest = {
   exported_at_utc: new Date().toISOString(),
   period_start_utc: from, period_end_utc: new Date(dayEnd).toISOString(),
   db_snapshot_at_utc: new Date().toISOString(),
-  revision: 1, reason: 'initial', code_version: codeVersion,
+  revision: 2, reason: 'HOM-36: user_id/referrer_id псевдонимизированы (stable HMAC-SHA256 с серверной солью, префикс u_v1_); состав полей без изменений',
+  user_id_pseudonymization: { method: 'hmac-sha256-truncated-24', prefix: `u_${PSEUDO_VERSION}_`, salt_key_id: saltKeyId, stable_across_days: true },
+  code_version: codeVersion,
   errors: [], missing_minutes: [],
   files: Object.fromEntries(Object.entries(files).map(([n, c]) => [n, { sha256: sha256(Buffer.from(c)), rows: c.split('\n').length - 1 }])),
 };

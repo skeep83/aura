@@ -656,6 +656,47 @@ test('HOM-31: WEB_ANON — браузер без initData входит, полу
   for (const c of [again, byId, forged]) c.ws.close();
 });
 
+test('HOM-36: веб ?src= создаёт пользователя с source=токен; ?ref= привязывает пригласившего; первое касание не перезаписывается', async t => {
+  const port = await startServer(t, { DEV_ALLOW_ANON: '', WEB_ANON: '1', ADMIN_API_TOKEN: 'h36-token-0123456789' });
+  const call = async (p, { method = 'GET', body, token = 'h36-token-0123456789' } = {}) => {
+    const res = await fetch(`http://127.0.0.1:${port}/api/admin/${p}`, {
+      method, headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: body && JSON.stringify(body),
+    });
+    return { status: res.status, data: await res.json().catch(() => null) };
+  };
+  // Критерий приёмки 1: переход с ?src=test_manual -> source = test_manual
+  const a = await client(port, 'web-h36-src', { webSrc: 'test_manual' });
+  assert.ok(a.ready.appName);
+  let d = (await call('users/web-h36-src')).data;
+  assert.equal(d.user.source, 'test_manual');
+  // Повторный заход с другим токеном — source не меняется (первое касание)
+  a.ws.close();
+  const a2 = await client(port, 'web-h36-src', { webSrc: 'qr' });
+  d = (await call('users/web-h36-src')).data;
+  assert.equal(d.user.source, 'test_manual');
+  a2.ws.close();
+  // Рефералка: ?ref=<код> — Premium обоим, пригласивший закреплён
+  const inv = await client(port, 'web-h36-inv');
+  const code = inv.ready.me.shareLink.split('/r/')[1];
+  const b = await client(port, 'web-h36-ref', { webSrc: 'blog_cta', webRef: code });
+  assert.equal(b.ready.referred, true);
+  assert.equal(b.ready.me.premium, true);
+  assert.ok((await inv.next('referral')).t === 'referral');
+  d = (await call('users/web-h36-ref')).data;
+  assert.equal(d.user.source, 'blog_cta');
+  // Схемный токен каталога — тоже source (Growth правит только URL)
+  const c = await client(port, 'web-h36-dir', { webSrc: 'dir_newcatalog-2' });
+  assert.ok(c.ready.appName);
+  d = (await call('users/web-h36-dir')).data;
+  assert.equal(d.user.source, 'dir_newcatalog-2');
+  // Органика: source = unknown, не выдуманный канал
+  const o = await client(port, 'web-h36-org');
+  assert.ok(o.ready.appName);
+  d = (await call('users/web-h36-org')).data;
+  assert.equal(d.user.source, 'unknown');
+  for (const x of [inv, b, c, o]) x.ws.close();
+});
+
 test('Нити: старт в звонке показывается собеседнику, передача меняет держателя, карман приходит в ready', async t => {
   const port = await startServer(t, { THREAD_HOPS_WISH: '3' });
   const a = await client(port, 'dev-th-a', { devCountry: 'MD', lang: 'ru' }), b = await client(port, 'dev-th-b', { devCountry: 'AR', lang: 'es' });

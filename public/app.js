@@ -55,6 +55,18 @@
     get: k => { try { return localStorage.getItem(k); } catch { return null; } },
     set: (k, v) => { try { localStorage.setItem(k, v); } catch {} },
   };
+  // HOM-36: веб-атрибуция ?src=<токен> / ?ref=<код>. Правило первого касания: сохранённое
+  // не перезаписывается повторным открытием. Хранилище — localStorage: переживает онбординг,
+  // гейт 18+ и перезаходы (в отличие от sessionStorage); применяется сервером при создании
+  // пользователя, а не на лендинге.
+  (function captureAttribution() {
+    try {
+      const q = new URLSearchParams(location.search);
+      const ok = v => /^[A-Za-z0-9_-]{1,64}$/.test(v || '');
+      if (ok(q.get('src')) && !localStorage.getItem('auraSrc')) localStorage.setItem('auraSrc', q.get('src'));
+      if (ok(q.get('ref')) && !localStorage.getItem('auraRef')) localStorage.setItem('auraRef', q.get('ref'));
+    } catch {}
+  })();
   const haptic = (kind = 'light') => {
     const h = tg?.HapticFeedback;
     if (!h) return;
@@ -481,6 +493,9 @@
       // Браузер на компьютере: одноразовый код из Mini App или сохранённая сессия
       ...(tg?.initData ? {} : { login: q.get('login') || '', session: store.get('auraSession') || '' }),
       ...(tg?.initData ? {} : { devId: devId(), startParam: new URLSearchParams(location.search).get('startapp') || '', devCountry: new URLSearchParams(location.search).get('country') || '' }),
+      // HOM-36: источник и реферал из ?src=/?ref= (localStorage, первое касание) — и для Mini App,
+      // если подписанного start_param нет; сервер применит их только при создании пользователя
+      webSrc: store.get('auraSrc') || '', webRef: store.get('auraRef') || '',
     });
     ws.onmessage = e => handle(JSON.parse(e.data));
     ws.onclose = ev => {
