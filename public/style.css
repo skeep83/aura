@@ -13,8 +13,11 @@
   --warm-ring: rgba(255, 120, 70, .4);
   --text: #4b5064;
   --title: #4f5468;
-  --muted: #9097ab;
-  --icon: #7d849c;
+  /* HOM-38: контраст светлой темы до AA. Было #9097ab — 2.41:1 на --bg и 2.92:1 на карточке,
+     стало 4.71:1 и 5.69:1. Иконки (было #7d849c, 3.07:1) — 5.07:1, остаются чуть темнее текста,
+     как и были. Тёмная тема по плану не трогается: там уже 6.19:1. */
+  --muted: #5f667e;
+  --icon: #5a6179;
   --danger: #ef5b6e;
   --gold: #f4a42c;
   --ok: #34c77b;
@@ -164,6 +167,15 @@ a { color: var(--accent); text-decoration: none; font-weight: 600; }
 .onboard > :nth-child(2) { animation-delay: .06s; } .onboard > :nth-child(3) { animation-delay: .12s; }
 .onboard > :nth-child(4) { animation-delay: .18s; } .onboard > :nth-child(5) { animation-delay: .24s; }
 .onboard > :nth-child(6) { animation-delay: .3s; }
+/* HOM-38: .ob-form — обёртка только ради десктопной сетки в две колонки.
+   На мобильном у неё display: contents, поэтому поток и отступы остаются прежними,
+   а задержки анимации входа перенесены один-в-один:
+   плитки .12 → языки .18 → согласие .24 → «Начать» .3. */
+.ob-form { display: contents; }
+.ob-form > * { animation: rise .7s var(--ease) both; flex-shrink: 0; }
+.onboard > :nth-child(n+3) { animation-delay: 0s; }
+.ob-form > :nth-child(1) { animation-delay: .12s; } .ob-form > :nth-child(2) { animation-delay: .18s; }
+.ob-form > :nth-child(3) { animation-delay: .24s; } .ob-form > :nth-child(4) { animation-delay: .3s; }
 @keyframes rise { from { opacity: 0; transform: translateY(12px); } }
 
 .head { display: flex; align-items: center; justify-content: space-between; }
@@ -793,3 +805,187 @@ a { color: var(--accent); text-decoration: none; font-weight: 600; }
 .thf-btns button { height: 44px; padding: 0 18px; border-radius: 999px; font-weight: 700; font-size: 13px; background: rgba(255,255,255,.14); color: #fff; }
 .thf-btns button.go { background: linear-gradient(135deg, var(--th-a), var(--th-b)); box-shadow: 0 8px 20px -8px var(--th-b); }
 @media (max-height: 700px) { .thf-map { height: 28vh; } .thf-move span { font-size: 15px; } }
+
+/* =====================================================================
+   HOM-38: веб — брейкпоинты, десктопная раскладка, доступность.
+   Контракт этапа: мобильный вид не меняется, Telegram Mini App не меняется.
+   Поэтому все ширинные медиазапросы живут под html:not([data-tg]) — метку
+   выставляет инлайновый скрипт в <head> до первой отрисовки. Внутри Mini App
+   (в том числе на широком окне Telegram Desktop) всё остаётся как было.
+   ===================================================================== */
+
+/* ---------- Фокус с клавиатуры ---------- */
+/* Видимая рамка только для клавиатуры: по указателю :focus-visible не срабатывает,
+   поэтому нажатия мышью и пальцем выглядят ровно как раньше. */
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* Поверх видео интерфейс белый — синее кольцо на тёмном кадре не читается */
+#chat :focus-visible, .toast:focus-visible { outline-color: #fff; }
+/* На градиентных кнопках синее кольцо сливается с самой кнопкой */
+.btn-grad:focus-visible, .next:focus-visible, .send:focus-visible,
+.tiles button.on:focus-visible, .plan.on:focus-visible, .chip.on:focus-visible,
+.rate-btns .plus:focus-visible { outline-color: var(--title); outline-offset: 3px; }
+#chat .next:focus-visible, #chat .send:focus-visible { outline-color: #fff; }
+/* Чекбокс согласия визуально скрыт — рамку рисуем на его видимой коробочке */
+.consent input:focus-visible + .box { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* ---------- Наведение (только настоящий указатель) ---------- */
+/* Трансформы здесь не трогаем: на :active уже висят свои scale, и перебивать их
+   наведением — значит сломать отклик нажатия. */
+@media (hover: hover) and (pointer: fine) {
+  a:hover { text-decoration: underline; text-underline-offset: 3px; }
+  .icon-btn:hover { background: var(--accent-tint); color: var(--accent); }
+  .icon-btn.gold:hover { background: rgba(244, 164, 44, .16); color: var(--gold); }
+  .icon-btn.danger:hover { background: rgba(239, 91, 110, .14); color: var(--danger); }
+  #chat .icon-btn:hover, .rail-btn:hover, .dock-btn:hover,
+  .rate-btns button:hover, .game-card .row button:hover, .thf-btns button:hover {
+    background: rgba(255, 255, 255, .18); color: #fff;
+  }
+  #chat .icon-btn.gold:hover { color: #ffd27a; }
+  #chat .icon-btn.danger:hover { color: #ff8e9c; }
+  .dock-btn.on:hover { background: #fff; }
+  .dock-btn.off:hover { background: #fff; }
+  .btn-grad:not(:disabled):hover, .next:not(:disabled):hover, .send:hover,
+  .rate-btns .plus:hover, .game-card .row button.go:hover { filter: brightness(1.07); }
+  .btn-pill:hover { background: var(--lg-tint-strong); }
+  #chat .btn-pill:hover { background: rgba(255, 255, 255, .2); }
+  .list button:hover, .list-btn:hover, .invite:hover, .tiles button:not(.on):hover,
+  .plan:not(.on):hover, .stamp:hover, .room-banner:hover {
+    box-shadow: var(--shadow-sm), inset 0 0 0 1.5px var(--accent-ring);
+  }
+  .seg button:not(.on):hover, .chip:not(.on):hover { color: var(--title); }
+  .chip:not(.on):hover { box-shadow: var(--shadow-sm), inset 0 0 0 1.5px var(--accent-ring); }
+  .consent:hover .box { box-shadow: var(--shadow-sm), inset 0 0 0 1.5px var(--accent-ring); }
+  .pip:hover { box-shadow: var(--lg-shadow), 0 0 0 2px rgba(255, 255, 255, .35); }
+  .msg.them:hover, .msg.me:hover { opacity: 1; }
+}
+
+/* ---------- Размытая подложка под видео собеседника (только десктоп-веб) ---------- */
+/* Поток назначается из app.js и только когда раскладка десктопная, иначе
+   второй <video> не декодирует ничего лишнего на телефоне. */
+#remote-bg { display: none; }
+
+/* =====================  ≥ 768: планшет  ===================== */
+@media (min-width: 768px) {
+  html:not([data-tg]) .onboard { max-width: 520px; padding: 26px 26px 22px; }
+  html:not([data-tg]) .onboard .brand { font-size: 36px; }
+  html:not([data-tg]) .onboard .lead { font-size: 14.5px; max-width: 400px; }
+  html:not([data-tg]) .sheet { max-width: 560px; left: 16px; right: 16px; }
+  /* Док и чат не растягиваются во всю ширину — иначе на планшете «Далее» уезжает к краям */
+  html:not([data-tg]) #chat .bottom { max-width: 620px; left: 50%; right: auto; width: 100%; translate: -50% 0; }
+  html:not([data-tg]) #chat .messages { left: 50%; right: auto; width: min(100% - 24px, 620px); translate: -50% 0; }
+  html:not([data-tg]) #chat .pip { max-width: 150px; }
+  html:not([data-tg]) #chat .topbar { padding-left: 20px; padding-right: 20px; }
+  html:not([data-tg]) #chat .rail { right: 20px; }
+}
+
+/* =====================  ≥ 1024: десктопная раскладка  ===================== */
+@media (min-width: 1024px) {
+  html:not([data-tg]) { --web-aside: 360px; --scene-pad: 0px; }
+
+  /* --- Онбординг в две колонки: слева рассказ, справа карточка выбора --- */
+  html:not([data-tg]) #onboard { display: grid; place-items: center; padding: 24px; }
+  html:not([data-tg]) .onboard {
+    height: auto; max-height: 100%; max-width: 1040px; margin: 0;
+    display: grid; align-content: center;
+    grid-template-columns: minmax(280px, 1fr) 440px;
+    grid-template-areas: "head head" "hero form" "perks form";
+    column-gap: 48px; row-gap: 20px; padding: 32px 36px 28px;
+  }
+  html:not([data-tg]) .onboard > .head { grid-area: head; }
+  html:not([data-tg]) .onboard > .hello { grid-area: hero; margin-top: 0; align-self: center; }
+  html:not([data-tg]) .onboard > .ob-form { grid-area: form; display: flex; flex-direction: column; gap: 20px; animation: none; }
+  html:not([data-tg]) .onboard > .perks { grid-area: perks; margin: 0; justify-content: flex-start; align-self: start; }
+  html:not([data-tg]) .onboard .brand { font-size: 44px; }
+  html:not([data-tg]) .onboard .lead { font-size: 15px; max-width: 420px; }
+  html:not([data-tg]) #banned .onboard { grid-template-columns: 1fr; grid-template-areas: none; max-width: 520px; }
+
+  /* --- Звонок: сцена слева, колонка 360 справа --- */
+  html:not([data-tg]) #chat .stage { right: var(--web-aside); }
+  html:not([data-tg]) #chat .topbar { right: var(--web-aside); padding-left: 20px; padding-right: 20px; }
+  html:not([data-tg]) #chat .banners { right: calc(var(--web-aside) + 140px); left: 20px; }
+  html:not([data-tg]) #chat.idle .banners { right: calc(var(--web-aside) + 80px); }
+  /* Рельса уезжает вниз сцены: по центру она налезает на окно 240 px */
+  html:not([data-tg]) #chat .rail { right: calc(var(--web-aside) + 20px); top: auto; bottom: 104px; transform: none; }
+  html:not([data-tg]) #chat.idle .rail { top: calc(62px + var(--safe-top)); bottom: auto; }
+  html:not([data-tg]) #chat .game-layer { right: calc(var(--web-aside) + 76px); left: 20px; }
+  html:not([data-tg]) #chat .thread-card { right: calc(var(--web-aside) + 16px); }
+
+  /* Фон правой колонки: отдельный слой, чтобы не трогать фон самого #chat */
+  html:not([data-tg]) #chat::after {
+    content: ''; position: fixed; z-index: 1; top: 0; bottom: 0; right: 0; width: var(--web-aside);
+    background: rgba(10, 12, 26, .55); box-shadow: inset 1px 0 0 rgba(255, 255, 255, .07); pointer-events: none;
+  }
+
+  /* Кадр 16:9 по центру сцены: лица не растягиваются, вокруг — размытая подложка */
+  html:not([data-tg]) #chat #remote {
+    inset: 0; margin: auto; height: auto;
+    width: min(calc(100% - var(--scene-pad) * 2), calc((100vh - var(--scene-pad) * 2) * 16 / 9));
+    aspect-ratio: 16 / 9; max-height: calc(100% - var(--scene-pad) * 2);
+    border-radius: var(--r-panel);
+  }
+  html:not([data-tg]) #chat #remote-bg {
+    display: block; position: absolute; z-index: 0; inset: -40px;
+    width: calc(100% + 80px); height: calc(100% + 80px); object-fit: cover;
+    filter: blur(28px) saturate(130%) brightness(.5);
+  }
+
+  /* Своё окно — фиксированные 240 px в углу сцены */
+  html:not([data-tg]) #chat .pip {
+    width: 240px; max-width: none; top: 88px; right: 20px; border-radius: 22px;
+  }
+  html:not([data-tg]) #chat .pip video { border-radius: 19px; }
+
+  /* Правая колонка: карточка собеседника сверху, чат посередине, реакции и ввод снизу */
+  html:not([data-tg]) #chat .peer-chip {
+    position: fixed; z-index: 11; top: 16px; right: 16px; left: auto; translate: none;
+    width: calc(var(--web-aside) - 32px); max-width: none;
+    padding: 14px 16px; border-radius: var(--r-card); white-space: normal; text-align: left;
+  }
+  html:not([data-tg]) #chat .messages {
+    position: fixed; z-index: 11; left: auto; translate: none;
+    right: 16px; width: calc(var(--web-aside) - 32px);
+    top: 84px; bottom: 112px; justify-content: flex-end;
+    overflow-y: auto; scrollbar-width: thin; pointer-events: auto;
+  }
+  html:not([data-tg]) #chat.composing .messages { bottom: 112px; }
+  html:not([data-tg]) #chat .msg { max-width: 94%; }
+  html:not([data-tg]) #chat .bottom {
+    left: auto; right: 0; top: 0; width: var(--web-aside); translate: none; max-width: none;
+    justify-content: flex-end; padding: 16px 16px 18px; gap: 12px; pointer-events: none;
+  }
+  html:not([data-tg]) #chat .bottom > * { pointer-events: auto; }
+  /* Док остаётся плавающей капсулой по центру внизу — под сценой, а не в колонке */
+  html:not([data-tg]) #chat .dock {
+    position: fixed; left: 0; right: var(--web-aside); bottom: 20px; margin: 0 auto;
+    width: max-content; max-width: calc(100% - var(--web-aside) - 40px);
+  }
+  html:not([data-tg]) #chat .next { flex: none; min-width: 150px; padding: 0 22px; }
+
+  /* Листы превращаются в центрированные модалки */
+  html:not([data-tg]) .sheet {
+    left: 50%; right: auto; top: 50%; bottom: auto; translate: -50% -50%; margin: 0;
+    width: min(560px, calc(100vw - 64px)); max-width: 560px; max-height: min(82vh, 720px);
+    animation: modal-in .32s var(--ease-out);
+  }
+  html:not([data-tg]) .sheet .grip { display: none; }
+  html:not([data-tg]) .scrim { background: rgba(10, 14, 40, .42); }
+}
+@keyframes modal-in { from { opacity: 0; transform: scale(.96); } }
+
+/* =====================  ≥ 1440: просторный десктоп  ===================== */
+@media (min-width: 1440px) {
+  html:not([data-tg]) { --scene-pad: 24px; }
+  html:not([data-tg]) #onboard { padding: 40px; }
+  html:not([data-tg]) .onboard {
+    max-width: 1160px; grid-template-columns: minmax(320px, 1fr) 440px;
+    column-gap: 64px; padding: 40px 44px 36px;
+  }
+  html:not([data-tg]) .onboard .brand { font-size: 52px; }
+  html:not([data-tg]) .onboard .lead { font-size: 16px; max-width: 480px; }
+  html:not([data-tg]) #chat #remote { border-radius: 32px; }
+  html:not([data-tg]) #chat .pip { top: 96px; right: 28px; }
+  html:not([data-tg]) #chat .messages { top: 96px; font-size: 15px; }
+  html:not([data-tg]) #chat .dock { bottom: 28px; }
+  html:not([data-tg]) #chat .topbar { padding-left: 28px; padding-right: 28px; }
+  html:not([data-tg]) #chat .rail { right: calc(var(--web-aside) + 28px); }
+}

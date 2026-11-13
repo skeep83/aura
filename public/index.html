@@ -2,7 +2,9 @@
 <html lang="ru">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <!-- HOM-38: в вебе зум разрешён (WCAG 1.4.4). Запрет масштабирования возвращается только
+       внутри Telegram Mini App — там он нужен, чтобы жесты вебвью не ломали интерфейс. -->
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#e7e9f4">
   <title>Aura — видеочат со всем миром</title>
   <meta name="description" content="Aura — случайный видеочат прямо в браузере, без установки приложения. 18+, AI-модерация в реальном времени. Бесплатно, без регистрации.">
@@ -36,6 +38,24 @@
   <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <script>
+    // HOM-38: отметка «мы внутри Telegram Mini App» до первой отрисовки.
+    // На ней висят два решения: десктопная раскладка включается только вне Telegram
+    // (в Mini App окно на компьютере тоже бывает широким, а менять его вид нельзя),
+    // и запрет зума возвращается только здесь.
+    (function () {
+      var tg = window.Telegram && window.Telegram.WebApp;
+      // Параметры запуска Mini App приходят в адресе (`tgWebAppData`, `tgWebAppPlatform`) —
+      // из них же SDK и собирает initData. Смотрим на них отдельно, потому что скрипт
+      // telegram.org может не загрузиться, а узнать Telegram всё равно надо: иначе
+      // внутри Mini App включится десктопная раскладка.
+      var launch = location.hash.slice(1) + '&' + location.search.slice(1);
+      var inTg = Boolean(tg && (tg.initData || (tg.platform && tg.platform !== 'unknown')))
+        || /(^|&)tgWebApp(Data|Platform|Version)=/.test(launch);
+      if (!inTg) return;
+      document.documentElement.dataset.tg = '1';
+      var v = document.querySelector('meta[name="viewport"]');
+      if (v) v.content = 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover';
+    })();
     // Тема до отрисовки, чтобы не мигало: выбор пользователя → Telegram → система
     (function () {
       var tg = window.Telegram && window.Telegram.WebApp;
@@ -54,7 +74,7 @@
       }
     })();
   </script>
-  <link rel="stylesheet" href="style.css?v=20261026">
+  <link rel="stylesheet" href="style.css?v=20261113b">
 </head>
 <body>
   <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -128,6 +148,9 @@
         <div class="pills-row"><div class="pill"><span class="dot"></span><b id="online-onboard">—</b><span data-i="online">онлайн</span></div><div class="pill event-pill" id="event-teaser" hidden></div></div>
       </div>
 
+      <!-- HOM-38: обёртка нужна только для десктопа (онбординг в две колонки).
+           На мобильном у неё display:contents — поток и отступы ровно как были. -->
+      <div class="ob-form">
       <div class="tiles" id="gender-seg">
         <button data-v="m"><svg><use href="#i-male"/></svg><b data-i="guy">Парень</b><small data-i="thats_me">это я</small></button>
         <button data-v="f"><svg><use href="#i-female"/></svg><b data-i="girl">Девушка</b><small data-i="thats_me">это я</small></button>
@@ -146,6 +169,7 @@
 
       <button id="start" class="btn-grad" disabled><span data-i="start">Начать</span><svg><use href="#i-next"/></svg></button>
       <p id="cam-error" class="cam-error" hidden></p>
+      </div>
 
       <ul class="perks">
         <li><svg><use href="#i-shield"/></svg><span data-i="perk_mod">Автомодерация 18+</span></li>
@@ -167,6 +191,9 @@
   <main id="chat" class="screen" hidden>
     <div class="stage" id="stage">
       <video id="self-bg" autoplay playsinline muted aria-hidden="true"></video>
+      <!-- HOM-38: размытая подложка под кадром 16:9 на десктопе. Поток назначается
+           из app.js только при десктопной раскладке — на телефоне элемент скрыт и пуст. -->
+      <video id="remote-bg" autoplay playsinline muted aria-hidden="true"></video>
       <video id="remote" autoplay playsinline></video>
       <button class="btn-pill lg sound-on" id="sound-on" hidden>🔊 <span data-i="sound_on">Включить звук</span></button>
       <!-- Duo 2×2: сетка из четырёх видео -->
@@ -684,7 +711,7 @@
   <script src="worldmap.js?v=20261026"></script>
   <script src="threads.js?v=20261026"></script>
   <script src="duo.js?v=20261026"></script>
-  <script src="app.js?v=20261113"></script>
+  <script src="app.js?v=20261113b"></script>
   <script src="pwa.js?v=20261026"></script>
 </body>
 </html>

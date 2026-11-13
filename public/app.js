@@ -265,6 +265,25 @@
     }
   }
   window.auraPreferCodecs = preferCodecs;
+  // HOM-38: десктопная веб-раскладка. Граница та же, что в style.css (1024),
+  // и так же не включается внутри Telegram Mini App.
+  const desktopWebMq = matchMedia('(min-width: 1024px)');
+  const desktopWeb = () => document.documentElement.dataset.tg !== '1' && desktopWebMq.matches;
+  // Размытая подложка под кадром 16:9 — тот же поток во втором <video>.
+  // Вне десктопной раскладки поток не назначается: лишнего декодирования на телефоне нет.
+  function syncRemoteBg() {
+    const bg = $('remote-bg');
+    const want = desktopWeb() ? el.remote.srcObject : null;
+    if (bg.srcObject === want) return;
+    bg.srcObject = want;
+    if (want) bg.play().catch(() => {});
+  }
+  function setRemoteStream(stream) {
+    el.remote.srcObject = stream;
+    syncRemoteBg();
+  }
+  desktopWebMq.addEventListener?.('change', syncRemoteBg);
+
   async function playRemote() {
     if (!el.remote.srcObject || !el.remote.paused) return;
     try { await el.remote.play(); return; }
@@ -303,7 +322,7 @@
       pc.close();
       pc = null;
     }
-    el.remote.srcObject = null;
+    setRemoteStream(null);
     el.peerChip.hidden = true;
     clearMessages();
     games.reset();
@@ -338,7 +357,7 @@
     tuneSenders(pc);
 
     pc.ontrack = e => {
-      if (el.remote.srcObject !== e.streams[0]) el.remote.srcObject = e.streams[0];
+      if (el.remote.srcObject !== e.streams[0]) setRemoteStream(e.streams[0]);
       playRemote();
     };
     pc.onicecandidate = e => { if (e.candidate) send({ t: 'signal', data: { candidate: e.candidate } }); };
@@ -2188,12 +2207,17 @@
     addMessage(text, 'me');
     el.input.value = '';
   };
-  el.chatBtn.onclick = () => {
-    el.composer.hidden = !el.composer.hidden;
-    el.chatBtn.classList.toggle('on', !el.composer.hidden);
-    $('chat').classList.toggle('composing', !el.composer.hidden);
-    if (!el.composer.hidden) el.input.focus();
-  };
+  // HOM-38: открытие поля ввода вынесено в функцию — её же зовут клавиатура и
+  // десктопная раскладка. focus отдельным аргументом: на десктопе поле открыто
+  // с самого начала, и если сразу забрать в него фокус, перестанут работать N / M / →.
+  function setComposer(open, focus) {
+    if (el.composer.hidden !== open) return;
+    el.composer.hidden = !open;
+    el.chatBtn.classList.toggle('on', open);
+    $('chat').classList.toggle('composing', open);
+    if (open && focus) el.input.focus();
+  }
+  el.chatBtn.onclick = () => setComposer(el.composer.hidden, true);
 
   // ---------- Листы ----------
   let openSheetId = null;
@@ -2304,6 +2328,26 @@
     toast(t(track.enabled ? 'mic_on' : 'mic_off'), 1200);
     haptic();
   };
+
+  // ---------- HOM-38: клавиатура ----------
+  // Esc — закрыть лист (а если листа нет — свернуть поле ввода), N или → — следующий,
+  // M — микрофон, Enter — открыть поле ввода и встать в него курсором.
+  // Сама отправка — штатный submit формы, его не трогаем.
+  // Коды KeyN / KeyM, а не символы: иначе сочетания отвалятся на русской раскладке.
+  document.addEventListener('keydown', e => {
+    if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey) return;
+    const node = e.target;
+    const typing = node && (node.tagName === 'INPUT' || node.tagName === 'TEXTAREA' || node.isContentEditable);
+    if (e.key === 'Escape') {
+      if (openSheetId) { closeSheet(); e.preventDefault(); }
+      else if (!el.composer.hidden) { el.input.blur(); setComposer(false); e.preventDefault(); }
+      return;
+    }
+    if (typing || openSheetId || $('chat').hidden) return;
+    if (e.code === 'KeyN' || e.key === 'ArrowRight') { e.preventDefault(); swipeNext(); }
+    else if (e.code === 'KeyM') { e.preventDefault(); el.mic.click(); }
+    else if (e.key === 'Enter') { e.preventDefault(); setComposer(true, true); }
+  });
 
   // ---------- Свайп влево по видео — следующий ----------
   (() => {
@@ -2475,6 +2519,9 @@
     store.set('consent', '1');
     send({ t: 'profile', gender: me.gender, langs: myLangs });
     showScreen('chat');
+    // HOM-38: в десктопной раскладке чат — отдельная колонка, и прятать её не за чем.
+    // Без фокуса: иначе поле ввода сразу перехватит N / M / → .
+    if (desktopWeb()) setComposer(true);
     if (maskOn) setMask(true);
     el.local.play().catch(() => {}); // srcObject назначен, пока экран был скрыт — автоплей не стартует сам
     el.selfBg.play().catch(() => {});
