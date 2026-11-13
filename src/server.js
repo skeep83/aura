@@ -5,6 +5,7 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { validateInitData, turnCredentials } from './auth.js';
+import { createWebAuth, parseCookies } from './webauth.js';
 import { Matchmaker, exchangeMirror } from './matchmaker.js';
 import { Db } from './db.js';
 import { Moderation } from './moderation.js';
@@ -639,12 +640,35 @@ function checkSession(token, now = Date.now()) {
   const want = crypto.createHmac('sha256', sessionKey()).update(`${m[1]}.${m[2]}`).digest('base64url');
   return crypto.timingSafeEqual(Buffer.from(want), Buffer.from(m[3])) ? m[1] : null;
 }
+// HOM-39: сессия ведёт в настоящий аккаунт, даже если выдавалась анонимному профилю,
+// который потом слили при входе (merged_into). Так человек не теряет профиль после входа.
 function userFromSession(id, startParam = '') {
-  if (!id || !db.exists(id)) return null;
-  const u = db.user(id);
-  return { id, lang: u.lang || 'en', name: u.name || '', username: u.username || '', allowsPm: Boolean(u.allows_pm), startParam, web: true };
+  const root = id ? db.accountRoot(id) : '';
+  if (!root || !db.exists(root)) return null;
+  const u = db.user(root);
+  return { id: root, lang: u.lang || 'en', name: u.name || '', username: u.username || '', allowsPm: Boolean(u.allows_pm), startParam, web: true };
 }
 setInterval(() => { const now = Date.now(); for (const [k, v] of handoffs) if (v.exp < now) handoffs.delete(k); for (const [k, v] of invites) if (v < now) invites.delete(k); }, 60_000).unref();
+
+// HOM-39: вход на сайте (/auth/*). Пустой AUTH_PROVIDERS — модуль молчит, поведение прода не меняется.
+const webauth = createWebAuth({
+  db, cfg, env, makeSession, checkSession,
+  // Аккаунт удалён — живое соединение сразу отключаем, иначе человек продолжает сидеть в поиске
+  onAccountGone: id => clients.get(id)?.close('deleted'),
+});
+
+// Экран аккаунта: привязанные входы, способ входа, профиль из соцсети и список доступных провайдеров
+function accountInfo(id) {
+  const u = db.user(id);
+  return {
+    authKind: u.auth_kind || '',
+    displayName: u.display_name || '',
+    avatar: u.avatar_url || '',
+    logins: db.identitiesOf(id).map(i => ({ provider: i.provider, name: i.name, email: i.email, at: i.created_at })),
+    providers: Object.values(webauth.providers).map(p => p.name),
+    telegramBot: webauth.providers.telegram ? cfg.botUsername || '' : '',
+  };
+}
 
 async function onStoryUpload(req, res) {
   const user = validateInitData(req.headers['x-init-data'], cfg.botToken)
@@ -718,6 +742,11 @@ const server = http.createServer((req, res) => {
       moderationUp: moderation.enabled ? moderation.up !== false : null, turn: Boolean(cfg.turnSecret || cfg.cfTurnKeyId), event: eventInfo().active,
     });
   }
+  // Вход на сайте: /auth/providers, /auth/:provider/start|callback, /auth/link/:provider, logout, delete
+  if (url.pathname.startsWith('/auth/')) {
+    webauth.handle(req, res, url).catch(e => { console.error('auth:', e.message); if (!res.headersSent) { res.writeHead(500); res.end(); } });
+    return;
+  }
   if (url.pathname === '/api/story' && req.method === 'POST') return onStoryUpload(req, res);
   if (url.pathname === '/api/landing' && req.method === 'POST') return onLanding(req, res);
   if (url.pathname === '/api/share/prepare' && req.method === 'POST') return onSharePrepare(req, res);
@@ -744,6 +773,8 @@ const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 256 * 1024 })
 wss.on('connection', (ws, req) => {
   // Страна пользователя — заголовок Cloudflare (через туннель и nginx)
   const country = String(req.headers['cf-ipcountry'] || '').toUpperCase().slice(0, 2);
+  // HOM-39: cookie-сессия приходит в заголовках handshake — её читаем до токена из сообщения auth
+  const cookies = parseCookies(req.headers.cookie);
   let client = null;
   let lastNext = 0, lastChat = 0, lastFrame = 0, lastGame = 0, lastReact = 0, lastTopic = 0;
   const translations = []; // время переводов за последний час (лимит)
@@ -762,12 +793,18 @@ wss.on('connection', (ws, req) => {
       handoffs.delete(String(msg.login));
       if (h && h.exp > Date.now()) { user = userFromSession(h.userId, String(msg.startParam || '')); if (user) session = makeSession(user.id); }
     }
+    // HOM-39: порядок — initData → login-код → cookie-сессия → токен из сообщения → анонимный вход.
+    // Cookie идёт раньше токена из localStorage: после входа в аккаунт он главнее старого анонимного.
+    if (!user && cookies.aura_session) user = userFromSession(checkSession(cookies.aura_session), String(msg.startParam || ''));
     if (!user && msg.session) user = userFromSession(checkSession(msg.session), String(msg.startParam || ''));
     if (!user && (cfg.devAnon || cfg.webAnon)) {
       // HOM-31: анонимный вход. dev-режим — локальная отладка (id dev-*, is_test в аналитике);
       // webAnon — прод для браузерных пользователей: id web-* (не тестовый) + сессия 30 дней сразу,
       // чтобы профиль переживал перезаход без sessionStorage.
-      const idOk = /^(dev|web)-[\w-]{4,40}$/.test(String(msg.devId || ''));
+      // HOM-39: id из localStorage — не доказательство владения, поэтому в анонимный профиль с
+      // привязанным входом или уже слитый им не войти: такие аккаунты открываются только по сессии.
+      const claimed = String(msg.devId || '');
+      const idOk = /^(dev|web)-[\w-]{4,40}$/.test(claimed) && !db.isMerged(claimed) && !db.hasIdentity(claimed);
       user = {
         id: idOk ? String(msg.devId) : (cfg.webAnon ? 'web-' + crypto.randomUUID().slice(0, 10) : 'dev-' + crypto.randomUUID().slice(0, 8)),
         lang: cfg.devAnon ? 'ru' : String(msg.lang || 'en').slice(0, 5), name: cfg.devAnon ? 'Dev' : '', username: '', allowsPm: false,
@@ -791,6 +828,10 @@ wss.on('connection', (ws, req) => {
     if (until) { send({ t: 'banned', until }); return ws.close(4004, 'banned'); }
 
     if (!user.web) db.touch(user.id, user); else db.touch(user.id, { ...user, lang: user.lang });
+    // HOM-39: способ входа для экрана аккаунта и аналитики. Метку провайдера (её ставит /auth/*)
+    // не затираем: по cookie-сессии приходит уже вошедший человек.
+    if (validatedKind === 'initdata') db.setAuthKind(user.id, 'telegram');
+    else if (validatedKind === 'web_anon') db.setAuthKind(user.id, 'web_anon');
     const sp = user.startParam || '';
     let referred = false;
     // Реферал: ссылка ref_<код> или приглашение inv_<код> — новичку и другу по суткам Premium.
@@ -899,6 +940,8 @@ wss.on('connection', (ws, req) => {
       invite: (invites.get(client.id) || 0) > Date.now() ? { until: invites.get(client.id) } : null,
       thread: threadCard, threadsSeen: u.threads_seen || 0, threadKinds: Object.fromEntries(Object.entries(threadKinds).map(([k, v]) => [k, v])),
       openThread: /^thread_[\w-]{1,20}$/.test(sp) ? sp.slice(7) : null,
+      // HOM-39: вход на сайте. Пустой AUTH_PROVIDERS — providers пуст, кнопок входа нет.
+      account: accountInfo(client.id),
     });
     if (session) { send({ t: 'session', token: session }); db.event('web_login', user.id); }
     if (client.callFrom) {
@@ -1713,5 +1756,6 @@ server.listen(cfg.port, () => {
   console.log(`${cfg.appName} on :${cfg.port}${cfg.devAnon ? ' (DEV_ALLOW_ANON — без проверки Telegram!)' : ''}`);
   if (!cfg.turnSecret) console.warn('TURN не настроен: часть пользователей за NAT не соединится');
   if (!moderation.enabled) console.warn('MODERATION_URL не задан: автомодерация выключена');
-  bot?.start();
+  // BOT_POLLING=0 — поднять api с токеном бота, но без long polling (нужно тестам входа через Telegram)
+  if (env.BOT_POLLING !== '0') bot?.start();
 });

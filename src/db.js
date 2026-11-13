@@ -37,6 +37,11 @@ const USER_COLUMNS = {
   ex_learn: "TEXT NOT NULL DEFAULT ''",           // языковой обмен: учу
   threads_seen: 'INTEGER NOT NULL DEFAULT 0',     // сколько раз человек видел карточку нити (подсказки — первые три раза)
   pair: 'INTEGER NOT NULL DEFAULT 0',             // «вдвоём с одного телефона»
+  // Веб-аккаунты (HOM-39): профиль из соцсети, мягкое слияние, способ входа
+  display_name: "TEXT NOT NULL DEFAULT ''",       // имя из провайдера (у телеграмных остаётся name)
+  avatar_url: "TEXT NOT NULL DEFAULT ''",
+  merged_into: "TEXT NOT NULL DEFAULT ''",        // анонимный профиль слит в этот аккаунт
+  auth_kind: "TEXT NOT NULL DEFAULT ''",          // telegram | web_anon | <провайдер> — последний способ входа
 };
 
 // Пользователи, жалобы, платежи, комнаты, оценки. SQLite в одном файле — хватает на один процесс.
@@ -122,6 +127,20 @@ export class Db {
         at INTEGER NOT NULL,
         PRIMARY KEY (a, b)
       );
+      -- HOM-39: внешние входы. Один аккаунт (users.id) — сколько угодно привязок.
+      CREATE TABLE IF NOT EXISTS identities (
+        provider      TEXT NOT NULL,          -- telegram | google | yandex | vk | email
+        provider_uid  TEXT NOT NULL,          -- id пользователя у провайдера (для email — нормализованный адрес)
+        user_id       TEXT NOT NULL,          -- users.id
+        email         TEXT NOT NULL DEFAULT '',
+        email_verified INTEGER NOT NULL DEFAULT 0,
+        name          TEXT NOT NULL DEFAULT '',
+        avatar        TEXT NOT NULL DEFAULT '',
+        created_at    INTEGER NOT NULL,
+        last_login_at INTEGER NOT NULL,
+        PRIMARY KEY (provider, provider_uid)
+      );
+      CREATE INDEX IF NOT EXISTS identities_user ON identities (user_id);
     `);
     const have = new Set(this.db.prepare('PRAGMA table_info(users)').all().map(c => c.name));
     for (const [col, def] of Object.entries(USER_COLUMNS)) {
@@ -393,6 +412,150 @@ export class Db {
   friendsOf(id) {
     return this.db.prepare(`SELECT u.id, u.name, u.username, u.country, u.last_seen AS lastSeen, f.at
       FROM friends f JOIN users u ON u.id = f.b WHERE f.a = ? ORDER BY u.last_seen DESC LIMIT 200`).all(id);
+  }
+
+  // ---------- Внешние входы, слияние профилей, удаление аккаунта (HOM-39) ----------
+
+  // Слитый анонимный профиль ведёт к настоящему аккаунту. Цепочку разворачиваем до корня
+  // (ограничение глубины — страховка от испорченных данных, а не ожидаемый случай).
+  accountRoot(id) {
+    let cur = String(id || '');
+    for (let i = 0; i < 8; i++) {
+      const next = this.db.prepare('SELECT merged_into AS m FROM users WHERE id = ?').get(cur)?.m || '';
+      if (!next || next === cur) return cur;
+      cur = next;
+    }
+    return cur;
+  }
+  isMerged(id) { return Boolean(this.db.prepare('SELECT 1 FROM users WHERE id = ? AND merged_into != \'\'').get(String(id || ''))); }
+
+  identity(provider, uid) {
+    return this.db.prepare('SELECT * FROM identities WHERE provider = ? AND provider_uid = ?').get(String(provider), String(uid)) || null;
+  }
+  identitiesOf(userId) {
+    return this.db.prepare('SELECT provider, provider_uid, email, email_verified, name, avatar, created_at, last_login_at FROM identities WHERE user_id = ? ORDER BY created_at').all(String(userId));
+  }
+  hasIdentity(userId) { return Boolean(this.db.prepare('SELECT 1 FROM identities WHERE user_id = ? LIMIT 1').get(String(userId))); }
+
+  // Привязка провайдера к аккаунту. Повторный вход тем же provider_uid только обновляет профиль:
+  // переезд привязки на другой аккаунт здесь невозможен — это делает только явное слияние.
+  upsertIdentity({ provider, providerUid, userId, email = '', emailVerified = false, name = '', avatar = '' }, now = Date.now()) {
+    const uid = String(providerUid);
+    const existing = this.identity(provider, uid);
+    if (existing) {
+      this.db.prepare(`UPDATE identities SET email = ?, email_verified = ?, name = ?, avatar = ?, last_login_at = ?
+        WHERE provider = ? AND provider_uid = ?`)
+        .run(email, emailVerified ? 1 : 0, name, avatar, now, String(provider), uid);
+      return { ...this.identity(provider, uid), isNew: false };
+    }
+    this.user(userId, now);
+    this.db.prepare(`INSERT INTO identities (provider, provider_uid, user_id, email, email_verified, name, avatar, created_at, last_login_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(String(provider), uid, String(userId), email, emailVerified ? 1 : 0, name, avatar, now, now);
+    return { ...this.identity(provider, uid), isNew: true };
+  }
+  unlinkIdentity(provider, uid) {
+    return this.db.prepare('DELETE FROM identities WHERE provider = ? AND provider_uid = ?').run(String(provider), String(uid)).changes > 0;
+  }
+
+  setAuthKind(id, kind) { this.db.prepare('UPDATE users SET auth_kind = ? WHERE id = ?').run(String(kind || '').slice(0, 16), id); }
+  // Имя и аватар из соцсети. Пустые значения не стирают уже сохранённые.
+  setWebProfile(id, { name = '', avatar = '' } = {}) {
+    this.user(id);
+    if (name) this.db.prepare('UPDATE users SET display_name = ? WHERE id = ?').run(String(name).slice(0, 64), id);
+    if (avatar) this.db.prepare('UPDATE users SET avatar_url = ? WHERE id = ?').run(String(avatar).slice(0, 300), id);
+  }
+
+  // Мягкое слияние: аккаунт from переносит нажитое в to и помечается merged_into.
+  // События и сессии прошлого не переписываем — аналитика остаётся консистентной (план HOM-35, §4.3).
+  // Идемпотентно: повторный вызов для уже слитой пары ничего не делает.
+  mergeAccounts(fromId, toId, now = Date.now()) {
+    const from = this.accountRoot(fromId);
+    const to = this.accountRoot(toId);
+    if (!from || !to || from === to) return { merged: false, into: to || from };
+    if (!this.exists(from)) return { merged: false, into: to };
+    this.user(to, now);
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const f = this.db.prepare('SELECT * FROM users WHERE id = ?').get(from);
+      const t = this.db.prepare('SELECT * FROM users WHERE id = ?').get(to);
+      this.db.prepare(`UPDATE users SET
+          premium_until = MAX(premium_until, ?),
+          karma_up = karma_up + ?, karma_down = karma_down + ?,
+          aura_bonus = aura_bonus + ?, salutes = salutes + ?, salutes_received = salutes_received + ?,
+          referrals = referrals + ?, strikes = MAX(strikes, ?), banned_until = MAX(banned_until, ?),
+          threads_seen = MAX(threads_seen, ?), last_seen = MAX(last_seen, ?),
+          ban_reason = COALESCE(ban_reason, ?),
+          referred_by = CASE WHEN referred_by = '' THEN ? ELSE referred_by END,
+          display_name = CASE WHEN display_name = '' THEN ? ELSE display_name END,
+          avatar_url = CASE WHEN avatar_url = '' THEN ? ELSE avatar_url END,
+          country = CASE WHEN country = '' THEN ? ELSE country END,
+          langs = CASE WHEN langs = '' THEN ? ELSE langs END,
+          source = CASE WHEN source = '' THEN ? ELSE source END
+        WHERE id = ?`)
+        .run(f.premium_until, f.karma_up, f.karma_down, f.aura_bonus, f.salutes, f.salutes_received,
+          f.referrals, f.strikes, f.banned_until, f.threads_seen, f.last_seen,
+          f.banned_until > now ? f.ban_reason : t.ban_reason,
+          f.referred_by === to ? '' : f.referred_by, f.display_name, f.avatar_url, f.country, f.langs, f.source, to);
+      // Серия дней: берём более свежую
+      if (f.streak_day > (t.streak_day || '')) this.db.prepare('UPDATE users SET streak = ?, streak_day = ? WHERE id = ?').run(f.streak, f.streak_day, to);
+      // Паспорт, друзья, подписки — объединение; дубли отбрасываются
+      this.db.prepare('INSERT OR IGNORE INTO passport (user_id, country, first_at) SELECT ?, country, first_at FROM passport WHERE user_id = ?').run(to, from);
+      this.db.prepare('INSERT OR IGNORE INTO friends (a, b, at) SELECT ?, b, at FROM friends WHERE a = ? AND b != ?').run(to, from, to);
+      this.db.prepare('INSERT OR IGNORE INTO friends (a, b, at) SELECT a, ?, at FROM friends WHERE b = ? AND a != ?').run(to, from, to);
+      this.db.prepare('DELETE FROM friends WHERE a = ? OR b = ?').run(from, from);
+      this.db.prepare('INSERT OR IGNORE INTO live_subs (code, user_id, at) SELECT code, ?, at FROM live_subs WHERE user_id = ?').run(to, from);
+      this.db.prepare('DELETE FROM live_subs WHERE user_id = ?').run(from);
+      // Комплименты, оценки, жалобы и платежи следуют за аккаунтом
+      this.db.prepare('UPDATE compliments SET target = ? WHERE target = ?').run(to, from);
+      this.db.prepare('UPDATE compliments SET from_id = ? WHERE from_id = ?').run(to, from);
+      this.db.prepare('DELETE FROM compliments WHERE target = from_id').run();
+      this.db.prepare('UPDATE OR IGNORE ratings SET target = ? WHERE target = ?').run(to, from);
+      this.db.prepare('UPDATE OR IGNORE ratings SET rater = ? WHERE rater = ?').run(to, from);
+      this.db.prepare('DELETE FROM ratings WHERE rater = target').run();
+      this.db.prepare('INSERT OR IGNORE INTO reports (target, reporter, reason, at) SELECT ?, reporter, reason, at FROM reports WHERE target = ? AND reporter != ?').run(to, from, to);
+      this.db.prepare('INSERT OR IGNORE INTO reports (target, reporter, reason, at) SELECT target, ?, reason, at FROM reports WHERE reporter = ? AND target != ?').run(to, from, to);
+      this.db.prepare('DELETE FROM reports WHERE target = ? OR reporter = ?').run(from, from);
+      this.db.prepare('UPDATE payments SET user_id = ? WHERE user_id = ?').run(to, from);
+      this.db.prepare('UPDATE rooms SET owner_id = ? WHERE owner_id = ?').run(to, from);
+      this.db.prepare('UPDATE users SET referred_by = ? WHERE referred_by = ?').run(to, from);
+      this.db.prepare('UPDATE identities SET user_id = ? WHERE user_id = ?').run(to, from);
+      // Сам профиль гасим: пустой, без сессионных прав, со ссылкой на настоящий аккаунт
+      this.db.prepare(`UPDATE users SET merged_into = ?, premium_until = 0, salutes = 0, aura_bonus = 0,
+          karma_up = 0, karma_down = 0, banned_until = 0, ban_reason = NULL, ref_code = '', crowd_until = 0 WHERE id = ?`).run(to, from);
+      this.db.exec('COMMIT');
+    } catch (e) {
+      this.db.exec('ROLLBACK');
+      throw e;
+    }
+    this.event('account_merge', to, 0, from, now);
+    return { merged: true, into: to };
+  }
+
+  // Удаление аккаунта (GDPR): личные данные уходят, обезличенные события и платежи остаются.
+  deleteAccount(id, now = Date.now()) {
+    const uid = String(id || '');
+    if (!uid || !this.exists(uid)) return false;
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      for (const sql of [
+        'DELETE FROM identities WHERE user_id = ?',
+        'DELETE FROM friends WHERE a = ? OR b = ?',
+        'DELETE FROM passport WHERE user_id = ?',
+        'DELETE FROM compliments WHERE target = ? OR from_id = ?',
+        'DELETE FROM live_subs WHERE user_id = ?',
+        'DELETE FROM ratings WHERE rater = ? OR target = ?',
+        'DELETE FROM reports WHERE target = ? OR reporter = ?',
+        'DELETE FROM users WHERE id = ?',
+      ]) this.db.prepare(sql).run(...Array(sql.split('?').length - 1).fill(uid));
+      this.db.prepare("UPDATE users SET referred_by = '' WHERE referred_by = ?").run(uid);
+      this.db.exec('COMMIT');
+    } catch (e) {
+      this.db.exec('ROLLBACK');
+      throw e;
+    }
+    this.event('account_delete', '', 0, '', now);
+    return true;
   }
 
   // ---------- Подписки «сообщить, когда стример выйдет в эфир» ----------
