@@ -895,6 +895,14 @@ a { color: var(--accent); text-decoration: none; font-weight: 600; }
   html:not([data-tg]) .onboard > .hello { grid-area: hero; margin-top: 0; align-self: center; }
   html:not([data-tg]) .onboard > .ob-form { grid-area: form; display: flex; flex-direction: column; gap: 20px; animation: none; }
   html:not([data-tg]) .onboard > .perks { grid-area: perks; margin: 0; justify-content: flex-start; align-self: start; }
+  /* HOM-39 добавил в онбординг блок входа. Он приходит не всегда (нет провайдеров —
+     стоит hidden, а скрытый элемент вообще не участвует в сетке), поэтому четвёртый
+     ряд объявляем только когда блок виден: иначе внизу остаётся пустой ряд с отступом.
+     Место ему — под карточкой выбора, в той же правой колонке. */
+  html:not([data-tg]) .onboard:has(> #login-onboard:not([hidden])) {
+    grid-template-areas: "head head" "hero form" "perks form" ". login";
+  }
+  html:not([data-tg]) .onboard > #login-onboard { grid-area: login; align-self: start; }
   html:not([data-tg]) .onboard .brand { font-size: 44px; }
   html:not([data-tg]) .onboard .lead { font-size: 15px; max-width: 420px; }
   html:not([data-tg]) #banned .onboard { grid-template-columns: 1fr; grid-template-areas: none; max-width: 520px; }
